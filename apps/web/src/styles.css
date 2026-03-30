@@ -255,7 +255,7 @@ body::before {
 
 .support-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.75fr) minmax(148px, 0.52fr) minmax(164px, 0.58fr);
+  grid-template-columns: minmax(0, 1fr) minmax(176px, 0.42fr) minmax(188px, 0.46fr);
   gap: 6px;
   margin-top: 2px;
   align-items: start;
@@ -453,7 +453,7 @@ body::before {
 
 .coverage-item {
   display: grid;
-  grid-template-columns: 68px 30px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 56px 72px;
   gap: 6px;
   align-items: baseline;
   padding: 1px 0;
@@ -474,6 +474,7 @@ body::before {
 
 .coverage-item-count {
   justify-self: end;
+  text-align: right;
 }
 
 .coverage-item-time {
@@ -507,7 +508,7 @@ body::before {
 
 .thesis-list li {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
+  grid-template-columns: 52px 52px minmax(0, 1fr);
   gap: 6px;
   align-items: baseline;
   padding: 1px 0;
@@ -529,14 +530,36 @@ body::before {
 }
 
 .support-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 6px;
+  display: grid;
+  gap: 2px;
   padding-bottom: 1px;
 }
 
-.support-meta {
+.support-columns {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 7px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-family: var(--mono);
+}
+
+.coverage-columns {
+  grid-template-columns: minmax(0, 1fr) 56px 72px;
+}
+
+.thesis-columns {
+  grid-template-columns: 52px 52px minmax(0, 1fr);
+}
+
+.support-columns span:nth-child(2),
+.support-columns span:nth-child(3) {
+  text-align: right;
+}
+
+.support-meta,
+.thesis-state {
   color: var(--muted);
   font-size: 7px;
   letter-spacing: 0.12em;
@@ -555,8 +578,13 @@ body::before {
   letter-spacing: 0.12em;
 }
 
+.thesis-state {
+  text-align: right;
+}
+
 .thesis-value {
   color: var(--text);
+  text-align: right;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
