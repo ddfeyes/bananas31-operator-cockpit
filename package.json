@@ -1,0 +1,11 @@
+{
+  "name": "bananas31-operator-cockpit",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Clean-room rebuild of the BANANAS31 operator cockpit.",
+  "packageManager": "pnpm@10.8.1",
+  "scripts": {
+    "check": "node scripts/check-bootstrap.mjs"
+  }
+}
+
