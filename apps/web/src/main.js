@@ -1,7 +1,7 @@
 import './styles.css';
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts';
 import { fetchBasis, fetchFunding, fetchOhlcv, fetchOi, fetchReplayEvents, fetchSnapshot } from './lib/api.js';
-import { computeVisibleRange, createActiveChartSync, INTERVAL_TO_SECONDS, shouldIgnoreRangeSyncError } from './lib/chartSync.js';
+import { computeVisibleRange, createActiveChartSync, shouldIgnoreRangeSyncError } from './lib/chartSync.js';
 import { matchHotkeyAction, readStoredCockpitPrefs, resolveReplayNeighbor, writeStoredCockpitPrefs } from './lib/cockpitState.js';
 import { formatCompact, formatPercent, formatPrice, getPricePrecision } from './lib/formatters.js';
 import {
@@ -10,8 +10,9 @@ import {
   compactReplayFocus,
   formatReplayTimestamp,
   pickReplayModeLabel,
-  summarizeReplayLine
+  summarizeReplayMetrics
 } from './lib/replay.js';
+import { getViewConfig } from './lib/viewConfig.js';
 
 const app = document.querySelector('#app');
 
@@ -163,11 +164,6 @@ const fundingMeta = document.querySelector('#funding-meta');
 
 const charts = {};
 const persistedPrefs = readStoredCockpitPrefs();
-const HISTORY_WINDOW_MINUTES = {
-  '1h': 60 * 24 * 180,
-  '4h': 60 * 24 * 365,
-  '1d': 60 * 24 * 730
-};
 const panelElements = {
   price: document.querySelector('#price-panel'),
   basis: document.querySelector('#basis-panel'),
@@ -247,8 +243,15 @@ function barsLabel(count) {
   return `${count} ${state.interval.toUpperCase()} bars`;
 }
 
-function historyWindowMinutes(interval) {
-  return HISTORY_WINDOW_MINUTES[interval] || HISTORY_WINDOW_MINUTES['4h'];
+function formatPercentAxis(value, digits = 4) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '—';
+  return `${numeric.toFixed(digits)}%`;
+}
+
+function latestPoint(series) {
+  if (!Array.isArray(series) || series.length === 0) return null;
+  return series[series.length - 1];
 }
 
 function lastPointTime(series) {
@@ -370,7 +373,7 @@ function renderReplayEvents(events) {
     : `${events?.length || 0} windows`;
 
   replayList.innerHTML = (events || []).map((event) => {
-    const metricLine = summarizeReplayLine(event);
+    const metrics = summarizeReplayMetrics(event);
     return `
       <button class="replay-item ${state.replayEvent?.id === event.id ? 'active' : ''}" data-replay-id="${event.id}">
         <div class="replay-item-ledger">
@@ -378,7 +381,11 @@ function renderReplayEvents(events) {
           <span class="replay-item-title">${event.title}</span>
           <span class="replay-focus-pill">${compactReplayFocus(event.focus_mode)}</span>
         </div>
-        <div class="replay-item-metrics">${metricLine}</div>
+        <div class="replay-item-metrics">
+          <span>B ${metrics.basis}</span>
+          <span>OI ${metrics.oiChange}</span>
+          <span>F ${metrics.funding}</span>
+        </div>
       </button>
     `;
   }).join('');
@@ -448,11 +455,15 @@ function createCharts() {
   });
   charts.price.binancePerp = charts.price.chart.addSeries(LineSeries, {
     color: '#ffbc42',
-    lineWidth: 1
+    lineWidth: 1,
+    lastValueVisible: false,
+    priceLineVisible: false,
   });
   charts.price.bybitPerp = charts.price.chart.addSeries(LineSeries, {
     color: '#9a7cff',
-    lineWidth: 1
+    lineWidth: 1,
+    lastValueVisible: false,
+    priceLineVisible: false,
   });
 
   charts.basis = makeChart('#basis-chart');
@@ -461,9 +472,27 @@ function createCharts() {
     minMove: 0.0001,
     formatter: (value) => `${Number(value).toFixed(2)}%`
   };
-  charts.basis.binance = charts.basis.chart.addSeries(LineSeries, { color: '#ffbc42', lineWidth: 1, priceFormat: percentFormat });
-  charts.basis.bybit = charts.basis.chart.addSeries(LineSeries, { color: '#9a7cff', lineWidth: 1, priceFormat: percentFormat });
-  charts.basis.agg = charts.basis.chart.addSeries(LineSeries, { color: '#5ad1ff', lineWidth: 2, priceFormat: percentFormat });
+  charts.basis.binance = charts.basis.chart.addSeries(LineSeries, {
+    color: '#ffbc42',
+    lineWidth: 1,
+    priceFormat: percentFormat,
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
+  charts.basis.bybit = charts.basis.chart.addSeries(LineSeries, {
+    color: '#9a7cff',
+    lineWidth: 1,
+    priceFormat: percentFormat,
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
+  charts.basis.agg = charts.basis.chart.addSeries(LineSeries, {
+    color: '#5ad1ff',
+    lineWidth: 2,
+    priceFormat: percentFormat,
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
 
   charts.oi = makeChart('#oi-chart');
   const oiFormat = {
@@ -471,20 +500,52 @@ function createCharts() {
     minMove: 1,
     formatter: (value) => formatCompact(Number(value))
   };
-  charts.oi.binance = charts.oi.chart.addSeries(LineSeries, { color: '#ffbc42', lineWidth: 1, priceFormat: oiFormat });
-  charts.oi.bybit = charts.oi.chart.addSeries(LineSeries, { color: '#9a7cff', lineWidth: 1, priceFormat: oiFormat });
-  charts.oi.agg = charts.oi.chart.addSeries(LineSeries, { color: '#d7dde9', lineWidth: 2, priceFormat: oiFormat });
+  charts.oi.binance = charts.oi.chart.addSeries(LineSeries, {
+    color: '#ffbc42',
+    lineWidth: 1,
+    priceFormat: oiFormat,
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
+  charts.oi.bybit = charts.oi.chart.addSeries(LineSeries, {
+    color: '#9a7cff',
+    lineWidth: 1,
+    priceFormat: oiFormat,
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
+  charts.oi.agg = charts.oi.chart.addSeries(LineSeries, {
+    color: '#d7dde9',
+    lineWidth: 2,
+    priceFormat: oiFormat,
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
 
   charts.funding = makeChart('#funding-chart');
+  const fundingFormat = {
+    type: 'custom',
+    minMove: 0.0001,
+    formatter: (value) => formatPercentAxis(value, 4),
+  };
   charts.funding.binance = charts.funding.chart.addSeries(LineSeries, {
     color: '#ffbc42',
     lineWidth: 1,
-    priceFormat: percentFormat,
+    priceFormat: fundingFormat,
+    lastValueVisible: false,
+    priceLineVisible: false,
   });
   charts.funding.bybit = charts.funding.chart.addSeries(LineSeries, {
     color: '#9a7cff',
     lineWidth: 1,
-    priceFormat: percentFormat,
+    priceFormat: fundingFormat,
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
+  charts.funding.chart.applyOptions({
+    rightPriceScale: {
+      scaleMargins: { top: 0.14, bottom: 0.2 }
+    }
   });
 
   createActiveChartSync([
@@ -498,23 +559,37 @@ function createCharts() {
 function setVisibleRange(range) {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
+      let fallbackToFitContent = false;
       Object.values(charts).forEach(({ chart }) => {
         try {
           chart.timeScale().setVisibleRange(range);
         } catch (error) {
+          fallbackToFitContent = true;
           if (!shouldIgnoreRangeSyncError(error)) {
             console.warn('visible range skipped', error);
           }
         }
       });
+      if (fallbackToFitContent) {
+        Object.values(charts).forEach(({ chart }) => {
+          try {
+            chart.timeScale().fitContent();
+          } catch (error) {
+            if (!shouldIgnoreRangeSyncError(error)) {
+              console.warn('fit content skipped', error);
+            }
+          }
+        });
+      }
     });
   });
 }
 
 function applyRanges(priceBars) {
+  const view = getViewConfig(state.interval);
   const range = state.replayEvent
     ? buildReplayRange(state.replayEvent, state.interval)
-    : computeVisibleRange(priceBars, state.interval);
+    : computeVisibleRange(priceBars, state.interval, view.visibleBars);
   setVisibleRange(range);
 }
 
@@ -571,93 +646,119 @@ function stepReplayEvent(direction) {
 }
 
 function updatePanelMeta(data) {
+  const latestBasis = latestPoint(data.basis.aggregated);
+  const latestOiAgg = latestPoint(data.oi.aggregated);
+  const latestOiBinance = latestPoint(data.oi.per_source?.['binance-perp'] || []);
+  const latestOiBybit = latestPoint(data.oi.per_source?.['bybit-perp'] || []);
+  const fundingLatest = ['binance-perp', 'bybit-perp']
+    .map((source) => data.funding.per_source?.[source]?.at(-1)?.rate_8h)
+    .filter((value) => value != null)
+    .map((value) => formatPercent(value * 100, 4));
   priceMeta.textContent = state.replayEvent
     ? `${data.spot.bars.length} ${state.interval.toUpperCase()} · replay lock`
     : `${data.spot.bars.length} ${state.interval.toUpperCase()} · spot + perp`;
-  basisMeta.textContent = `${data.basis.aggregated.length} agg · 2 venues`;
-  oiMeta.textContent = `${data.oi.aggregated.length} agg · perp only`;
-  fundingMeta.textContent = `${(data.funding.per_source?.['binance-perp'] || []).length} resets`;
+  basisMeta.textContent = `${data.basis.aggregated.length} agg · ${formatPercent(latestBasis?.value, 2)}`;
+  oiMeta.textContent = `${formatCompact(latestOiAgg?.value)} agg · BN ${formatCompact(latestOiBinance?.value)} · BY ${formatCompact(latestOiBybit?.value)}`;
+  const fundingCount = Math.max(
+    data.funding.per_source?.['binance-perp']?.length || 0,
+    data.funding.per_source?.['bybit-perp']?.length || 0
+  );
+  fundingMeta.textContent = fundingLatest.length
+    ? `${fundingLatest.join(' · ')} latest`
+    : `${fundingCount} resets`;
 }
 
 async function loadCockpit() {
   const requestId = ++state.loadRequestId;
   const interval = state.interval;
-  const minutes = historyWindowMinutes(interval);
+  const view = getViewConfig(interval);
+  const minutes = view.lookbackMinutes;
   syncState.textContent = `Loading · ${interval.toUpperCase()}`;
   replayMeta.textContent = 'Loading';
+  intervalButtons.forEach((button) => {
+    button.disabled = true;
+  });
 
-  const [snapshot, spot, perp, bybit, basis, oi, funding, replay] = await Promise.all([
-    fetchSnapshot(),
-    fetchOhlcv('binance-spot', minutes, interval),
-    fetchOhlcv('binance-perp', minutes, interval),
-    fetchOhlcv('bybit-perp', minutes, interval),
-    fetchBasis(minutes * 60, interval),
-    fetchOi(minutes, interval),
-    fetchFunding(minutes * 60, INTERVAL_TO_SECONDS[interval] || 14400),
-    fetchReplayEvents(minutes * 60, interval, 6)
-  ]);
+  try {
+    const [snapshot, spot, perp, bybit, basis, oi, funding, replay] = await Promise.all([
+      fetchSnapshot(),
+      fetchOhlcv('binance-spot', minutes, interval),
+      fetchOhlcv('binance-perp', minutes, interval),
+      fetchOhlcv('bybit-perp', minutes, interval),
+      fetchBasis(minutes * 60, interval),
+      fetchOi(minutes, interval),
+      fetchFunding(minutes * 60, view.fundingIntervalSeconds),
+      fetchReplayEvents(minutes * 60, interval, view.replayLimit)
+    ]);
 
-  if (requestId !== state.loadRequestId || interval !== state.interval) {
-    return;
+    if (requestId !== state.loadRequestId || interval !== state.interval) {
+      return;
+    }
+
+    const payload = { snapshot, spot, perp, bybit, basis, oi, funding, replay };
+    state.payload = payload;
+    state.replayEvents = replay.events || [];
+
+    if (state.replayEvent) {
+      state.replayEvent = state.replayEvents.find((event) => event.id === state.replayEvent.id) || null;
+    }
+
+    renderSummary(snapshot);
+    renderCoverage(payload);
+    renderReplayEvents(state.replayEvents);
+    updatePanelMeta(payload);
+    updateStatusHeadline();
+
+    const pricePrecision = getPricePrecision([
+      ...(spot.bars || []),
+      ...(perp.bars || []).map((bar) => ({ value: bar.close })),
+      ...(bybit.bars || []).map((bar) => ({ value: bar.close }))
+    ]);
+    const precisePriceFormat = {
+      type: 'price',
+      precision: pricePrecision.precision,
+      minMove: pricePrecision.minMove
+    };
+    charts.price.candles.applyOptions({ priceFormat: precisePriceFormat });
+    charts.price.binancePerp.applyOptions({ priceFormat: precisePriceFormat });
+    charts.price.bybitPerp.applyOptions({ priceFormat: precisePriceFormat });
+
+    const spotBars = spot.bars || [];
+    charts.price.candles.setData(spotBars.map((bar) => ({
+      time: bar.time,
+      open: bar.open,
+      high: bar.high,
+      low: bar.low,
+      close: bar.close
+    })));
+    charts.price.volume.setData(spotBars.map((bar) => ({
+      time: bar.time,
+      value: bar.volume,
+      color: bar.close >= bar.open ? 'rgba(25, 215, 157, 0.35)' : 'rgba(255, 97, 116, 0.35)'
+    })));
+    charts.price.binancePerp.setData((perp.bars || []).map((bar) => ({ time: bar.time, value: bar.close })));
+    charts.price.bybitPerp.setData((bybit.bars || []).map((bar) => ({ time: bar.time, value: bar.close })));
+
+    charts.basis.binance.setData((basis.per_exchange?.binance || []).map((point) => ({ time: point.time, value: point.value })));
+    charts.basis.bybit.setData((basis.per_exchange?.bybit || []).map((point) => ({ time: point.time, value: point.value })));
+    charts.basis.agg.setData((basis.aggregated || []).map((point) => ({ time: point.time, value: point.value })));
+
+    charts.oi.binance.setData((oi.per_source?.['binance-perp'] || []).map((point) => ({ time: point.time, value: point.value })));
+    charts.oi.bybit.setData((oi.per_source?.['bybit-perp'] || []).map((point) => ({ time: point.time, value: point.value })));
+    charts.oi.agg.setData((oi.aggregated || []).map((point) => ({ time: point.time, value: point.value })));
+
+    charts.funding.binance.setData((funding.per_source?.['binance-perp'] || []).map((point) => ({ time: point.time, value: point.rate_8h * 100 })));
+    charts.funding.bybit.setData((funding.per_source?.['bybit-perp'] || []).map((point) => ({ time: point.time, value: point.rate_8h * 100 })));
+
+    applyRanges(spotBars);
+    setFocusMode(state.focusMode, { preserveReplay: true });
+  } finally {
+    if (requestId === state.loadRequestId) {
+      intervalButtons.forEach((button) => {
+        button.disabled = false;
+      });
+    }
   }
-
-  const payload = { snapshot, spot, perp, bybit, basis, oi, funding, replay };
-  state.payload = payload;
-  state.replayEvents = replay.events || [];
-
-  if (state.replayEvent) {
-    state.replayEvent = state.replayEvents.find((event) => event.id === state.replayEvent.id) || null;
-  }
-
-  renderSummary(snapshot);
-  renderCoverage(payload);
-  renderReplayEvents(state.replayEvents);
-  updatePanelMeta(payload);
-  updateStatusHeadline();
-
-  const pricePrecision = getPricePrecision([
-    ...(spot.bars || []),
-    ...(perp.bars || []).map((bar) => ({ value: bar.close })),
-    ...(bybit.bars || []).map((bar) => ({ value: bar.close }))
-  ]);
-  const precisePriceFormat = {
-    type: 'price',
-    precision: pricePrecision.precision,
-    minMove: pricePrecision.minMove
-  };
-  charts.price.candles.applyOptions({ priceFormat: precisePriceFormat });
-  charts.price.binancePerp.applyOptions({ priceFormat: precisePriceFormat });
-  charts.price.bybitPerp.applyOptions({ priceFormat: precisePriceFormat });
-
-  const spotBars = spot.bars || [];
-  charts.price.candles.setData(spotBars.map((bar) => ({
-    time: bar.time,
-    open: bar.open,
-    high: bar.high,
-    low: bar.low,
-    close: bar.close
-  })));
-  charts.price.volume.setData(spotBars.map((bar) => ({
-    time: bar.time,
-    value: bar.volume,
-    color: bar.close >= bar.open ? 'rgba(25, 215, 157, 0.35)' : 'rgba(255, 97, 116, 0.35)'
-  })));
-  charts.price.binancePerp.setData((perp.bars || []).map((bar) => ({ time: bar.time, value: bar.close })));
-  charts.price.bybitPerp.setData((bybit.bars || []).map((bar) => ({ time: bar.time, value: bar.close })));
-
-  charts.basis.binance.setData((basis.per_exchange?.binance || []).map((point) => ({ time: point.time, value: point.value })));
-  charts.basis.bybit.setData((basis.per_exchange?.bybit || []).map((point) => ({ time: point.time, value: point.value })));
-  charts.basis.agg.setData((basis.aggregated || []).map((point) => ({ time: point.time, value: point.value })));
-
-  charts.oi.binance.setData((oi.per_source?.['binance-perp'] || []).map((point) => ({ time: point.time, value: point.value })));
-  charts.oi.bybit.setData((oi.per_source?.['bybit-perp'] || []).map((point) => ({ time: point.time, value: point.value })));
-  charts.oi.agg.setData((oi.aggregated || []).map((point) => ({ time: point.time, value: point.value })));
-
-  charts.funding.binance.setData((funding.per_source?.['binance-perp'] || []).map((point) => ({ time: point.time, value: point.rate_8h * 100 })));
-  charts.funding.bybit.setData((funding.per_source?.['bybit-perp'] || []).map((point) => ({ time: point.time, value: point.rate_8h * 100 })));
-
-  applyRanges(spotBars);
-  setFocusMode(state.focusMode, { preserveReplay: true });
 }
 
 function selectInterval(interval) {
@@ -666,12 +767,17 @@ function selectInterval(interval) {
   }
 
   state.interval = interval;
+  state.replayEvent = null;
+  state.replayEvents = [];
   syncControlButtons();
   persistCockpitPrefs();
+  replayList.innerHTML = '<span class="loading">Loading interval…</span>';
   loadCockpit().catch((error) => {
-    console.error(error);
-    replayList.innerHTML = `<span class="loading">${error.message}</span>`;
-    syncState.textContent = 'Fault';
+    if (state.loadRequestId > 0) {
+      console.error(error);
+      replayList.innerHTML = `<span class="loading">${error.message}</span>`;
+      syncState.textContent = 'Fault';
+    }
   });
 }
 

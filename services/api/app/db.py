@@ -113,8 +113,18 @@ def fetch_latest_snapshot(database: Database) -> dict[str, Any]:
             (now - 86400,),
         ).fetchone()
         funding_rows = connection.execute(
-            "SELECT exchange_id, rate_8h FROM funding_rates WHERE timestamp >= ? ORDER BY timestamp DESC",
-            (now - 86400 * 30,),
+            """
+            SELECT ranked.exchange_id, ranked.rate_8h
+            FROM (
+                SELECT
+                    exchange_id,
+                    rate_8h,
+                    ROW_NUMBER() OVER (PARTITION BY exchange_id ORDER BY timestamp DESC) AS row_number
+                FROM funding_rates
+                WHERE rate_8h IS NOT NULL
+            ) ranked
+            WHERE ranked.row_number = 1
+            """
         ).fetchall()
         oi_rows = connection.execute(
             """
@@ -135,7 +145,7 @@ def fetch_latest_snapshot(database: Database) -> dict[str, Any]:
         agg_basis = basis["aggregated"][-1]["value"] if basis["aggregated"] else None
         avg_funding = None
         if funding_rows:
-            values = [row["rate_8h"] * 100 for row in funding_rows[:2]]
+            values = [row["rate_8h"] * 100 for row in funding_rows]
             avg_funding = sum(values) / len(values)
 
         return {
@@ -234,12 +244,35 @@ def fetch_oi_series(database: Database, minutes: int, interval: str) -> dict[str
         for exchange_id, source_rows in grouped.items()
     }
 
-    aggregated_map: dict[int, float] = defaultdict(float)
-    for series in per_source.values():
-        for point in series:
-            aggregated_map[point["time"]] += point["value"]
+    bucket_times = sorted(
+        {
+            point["time"]
+            for series in per_source.values()
+            for point in series
+        }
+    )
+    latest_values: dict[str, float | None] = {source: None for source in per_source}
+    series_indices: dict[str, int] = {source: 0 for source in per_source}
+    aggregated: list[dict[str, Any]] = []
 
-    aggregated = [{"time": key, "value": value} for key, value in sorted(aggregated_map.items())]
+    for bucket in bucket_times:
+        total = 0.0
+        has_value = False
+        for source, series in per_source.items():
+            index = series_indices[source]
+            while index < len(series) and series[index]["time"] <= bucket:
+                latest_values[source] = series[index]["value"]
+                index += 1
+            series_indices[source] = index
+            latest_value = latest_values[source]
+            if latest_value is None or latest_value <= 0:
+                continue
+            total += latest_value
+            has_value = True
+
+        if has_value:
+            aggregated.append({"time": bucket, "value": total})
+
     return {
         "per_source": per_source,
         "aggregated": aggregated,
