@@ -240,3 +240,96 @@ def fetch_funding_series(database: Database, window_secs: int, interval_secs: in
         },
     }
 
+
+def fetch_replay_events(database: Database, window_secs: int, interval: str, limit: int = 6) -> dict[str, Any]:
+    interval_secs = INTERVAL_TO_SECONDS.get(interval, 14400)
+    basis = fetch_basis_series(database, window_secs, interval)
+    oi = fetch_oi_series(database, max(60, window_secs // 60), interval)
+    funding = fetch_funding_series(database, window_secs, interval_secs)
+
+    oi_points = oi["aggregated"]
+    oi_map = {point["time"]: point["value"] for point in oi_points}
+    oi_delta_map: dict[int, float] = {}
+    previous_oi = None
+    for point in oi_points:
+        value = point["value"]
+        if previous_oi not in (None, 0):
+            oi_delta_map[point["time"]] = ((value - previous_oi) / previous_oi) * 100
+        else:
+            oi_delta_map[point["time"]] = 0.0
+        previous_oi = value
+
+    funding_points = sorted(
+        (
+            {"time": point["time"], "value": point["rate_8h"] * 100}
+            for series in funding["per_source"].values()
+            for point in series
+        ),
+        key=lambda point: point["time"],
+    )
+
+    def nearest_funding_value(timestamp: int) -> float:
+        nearest = 0.0
+        for point in funding_points:
+            if point["time"] > timestamp:
+                break
+            nearest = point["value"]
+        return nearest
+
+    events = []
+    for point in basis["aggregated"]:
+        timestamp = point["time"]
+        basis_pct = point["value"]
+        oi_total = oi_map.get(timestamp)
+        oi_change_pct = oi_delta_map.get(timestamp, 0.0)
+        funding_8h_pct = nearest_funding_value(timestamp)
+
+        score = abs(basis_pct) * 1.8 + abs(oi_change_pct) * 1.1 + abs(funding_8h_pct) * 5.5
+        if score < 0.35:
+            continue
+
+        if abs(basis_pct) >= max(abs(oi_change_pct), abs(funding_8h_pct) * 1.5):
+            focus_mode = "basis"
+            title = "Carry Expansion" if basis_pct > 0 else "Basis Compression"
+        elif abs(oi_change_pct) >= abs(funding_8h_pct) * 1.2:
+            focus_mode = "leverage"
+            title = "Leverage Build" if oi_change_pct > 0 else "Leverage Flush"
+        else:
+            focus_mode = "funding"
+            title = "Funding Heat" if funding_8h_pct > 0 else "Funding Relief"
+
+        summary = (
+            f"Basis {basis_pct:+.4f}% · "
+            f"OI Δ {oi_change_pct:+.2f}% · "
+            f"Funding {funding_8h_pct:+.4f}%"
+        )
+        events.append(
+            {
+                "id": f"{focus_mode}-{timestamp}",
+                "time": timestamp,
+                "title": title,
+                "summary": summary,
+                "focus_mode": focus_mode,
+                "score": round(score, 4),
+                "window_from": timestamp - interval_secs * 6,
+                "window_to": timestamp + interval_secs * 2,
+                "metrics": {
+                    "basis_pct": round(basis_pct, 6),
+                    "oi_total": oi_total,
+                    "oi_change_pct": round(oi_change_pct, 6),
+                    "funding_8h_pct": round(funding_8h_pct, 6),
+                },
+            }
+        )
+
+    ranked = sorted(events, key=lambda event: (event["score"], event["time"]), reverse=True)[:limit]
+    ranked.sort(key=lambda event: event["time"], reverse=True)
+
+    return {
+        "window_secs": window_secs,
+        "interval": interval,
+        "interval_secs": interval_secs,
+        "limit": limit,
+        "count": len(ranked),
+        "events": ranked,
+    }

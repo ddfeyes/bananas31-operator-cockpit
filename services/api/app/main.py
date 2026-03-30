@@ -15,6 +15,7 @@ from .db import (
     fetch_latest_snapshot,
     fetch_ohlcv_series,
     fetch_oi_series,
+    fetch_replay_events,
 )
 
 
@@ -88,6 +89,14 @@ def create_app(database: Database | None = None) -> FastAPI:
         interval_secs: int = Query(14400, ge=300),
     ) -> dict:
         return fetch_funding_series(db, window_secs, interval_secs)
+
+    @app.get("/api/replay/events")
+    def replay_events(
+        window_secs: int = Query(86400 * 30, ge=3600),
+        interval: str = Query("4h"),
+        limit: int = Query(6, ge=1, le=24),
+    ) -> dict:
+        return fetch_replay_events(db, window_secs, interval, limit)
 
     mount_web_app(app, WEB_DIST)
     return app

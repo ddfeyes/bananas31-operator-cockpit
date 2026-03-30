@@ -1,7 +1,8 @@
 import './styles.css';
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts';
-import { fetchBasis, fetchFunding, fetchOhlcv, fetchOi, fetchSnapshot } from './lib/api.js';
+import { fetchBasis, fetchFunding, fetchOhlcv, fetchOi, fetchReplayEvents, fetchSnapshot } from './lib/api.js';
 import { computeVisibleRange, createActiveChartSync, INTERVAL_TO_SECONDS } from './lib/chartSync.js';
+import { buildFocusMap, buildReplayRange, pickReplayModeLabel } from './lib/replay.js';
 
 const app = document.querySelector('#app');
 
@@ -14,7 +15,7 @@ app.innerHTML = `
           <h1 class="brand-title">Carry, Basis, Pressure.</h1>
           <div class="signal-badge" id="sync-state">History Synced</div>
         </div>
-        <p class="brand-subtitle">A clean-room command surface for historical context, synchronized market structure, and operator-grade visibility across spot, perp, funding, and open interest.</p>
+        <p class="brand-subtitle">A clean-room command surface for historical context, synchronized market structure, operator-grade visibility across spot, perp, funding, and open interest, and replay locks for high-signal market windows.</p>
       </section>
 
       <aside class="mission-card">
@@ -43,9 +44,16 @@ app.innerHTML = `
         <button data-interval="1d">1D</button>
       </div>
 
-      <div class="toolbar-group mode-group">
-        <button class="active">Live + History</button>
-        <button>Replay-Ready</button>
+      <div class="toolbar-group focus-group" id="focus-group">
+        <button data-focus="all" class="active">Full Stack</button>
+        <button data-focus="basis">Carry Focus</button>
+        <button data-focus="leverage">Leverage Focus</button>
+        <button data-focus="funding">Reset Focus</button>
+      </div>
+
+      <div class="toolbar-group mode-group" id="mode-group">
+        <button data-live-reset class="active">Live Stack</button>
+        <button data-replay-indicator disabled>Replay Idle</button>
       </div>
 
       <div class="feed-strip">
@@ -58,7 +66,7 @@ app.innerHTML = `
 
     <section class="workspace-grid">
       <div class="chart-stage">
-        <article class="panel panel-hero">
+        <article class="panel panel-hero" id="price-panel">
           <div class="panel-header">
             <div>
               <p class="panel-kicker">Core Tape</p>
@@ -70,7 +78,7 @@ app.innerHTML = `
         </article>
 
         <div class="analytics-row">
-          <article class="panel">
+          <article class="panel" id="basis-panel">
             <div class="panel-header">
               <div>
                 <p class="panel-kicker">Carry</p>
@@ -81,7 +89,7 @@ app.innerHTML = `
             <div class="chart-slot chart-slot-compact" id="basis-chart"></div>
           </article>
 
-          <article class="panel">
+          <article class="panel" id="oi-panel">
             <div class="panel-header">
               <div>
                 <p class="panel-kicker">Leverage</p>
@@ -92,7 +100,7 @@ app.innerHTML = `
             <div class="chart-slot chart-slot-compact" id="oi-chart"></div>
           </article>
 
-          <article class="panel">
+          <article class="panel" id="funding-panel">
             <div class="panel-header">
               <div>
                 <p class="panel-kicker">Reset</p>
@@ -115,6 +123,17 @@ app.innerHTML = `
             <span class="panel-meta">Live snapshot</span>
           </div>
           <div class="rail-body rail-grid" id="operator-summary">Loading snapshot…</div>
+        </article>
+
+        <article class="panel rail-card">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Replay</p>
+              <h2 class="panel-title">Signal Windows</h2>
+            </div>
+            <span class="panel-meta">Lock charts to a context window</span>
+          </div>
+          <div class="replay-list" id="replay-list"></div>
         </article>
 
         <article class="panel rail-card">
@@ -145,9 +164,13 @@ app.innerHTML = `
 
 const summaryGrid = document.querySelector('#summary-grid');
 const operatorSummary = document.querySelector('#operator-summary');
+const replayList = document.querySelector('#replay-list');
 const coverageList = document.querySelector('#coverage-list');
 const thesisList = document.querySelector('#thesis-list');
 const intervalButtons = [...document.querySelectorAll('[data-interval]')];
+const focusButtons = [...document.querySelectorAll('[data-focus]')];
+const liveResetButton = document.querySelector('[data-live-reset]');
+const replayIndicatorButton = document.querySelector('[data-replay-indicator]');
 const liveRegime = document.querySelector('#live-regime');
 const liveRegimeDetail = document.querySelector('#live-regime-detail');
 const sessionWindow = document.querySelector('#session-window');
@@ -159,7 +182,20 @@ const oiMeta = document.querySelector('#oi-meta');
 const fundingMeta = document.querySelector('#funding-meta');
 
 const charts = {};
-let currentInterval = '4h';
+const panelElements = {
+  price: document.querySelector('#price-panel'),
+  basis: document.querySelector('#basis-panel'),
+  oi: document.querySelector('#oi-panel'),
+  funding: document.querySelector('#funding-panel')
+};
+
+const state = {
+  interval: '4h',
+  focusMode: 'all',
+  replayEvent: null,
+  replayEvents: [],
+  payload: null
+};
 
 function formatNumber(value, digits = 4) {
   if (value == null) return '—';
@@ -191,7 +227,7 @@ function formatTimestamp(timestamp) {
 }
 
 function barsLabel(count) {
-  return `${count} ${currentInterval.toUpperCase()} bars`;
+  return `${count} ${state.interval.toUpperCase()} bars`;
 }
 
 function lastPointTime(series) {
@@ -234,6 +270,15 @@ function deriveSessionThesis(snapshot) {
   return items;
 }
 
+function updateStatusHeadline() {
+  syncState.textContent = pickReplayModeLabel(state.replayEvent, state.focusMode);
+  replayIndicatorButton.textContent = state.replayEvent
+    ? `${state.replayEvent.title} · ${formatTimestamp(state.replayEvent.time)}`
+    : 'Replay Idle';
+  replayIndicatorButton.classList.toggle('active', Boolean(state.replayEvent));
+  liveResetButton.classList.toggle('active', !state.replayEvent);
+}
+
 function renderSummary(snapshot) {
   const cards = [
     ['Spot', formatNumber(snapshot.prices['binance-spot'], 6), 'Binance spot close'],
@@ -255,7 +300,6 @@ function renderSummary(snapshot) {
   const regime = snapshot.summary.basis_agg_pct >= 0 ? 'Carry On / Contango' : 'Defensive / Backwardation';
   liveRegime.textContent = regime;
   liveRegimeDetail.textContent = `Basis ${formatPercent(snapshot.summary.basis_agg_pct, 4)} · Funding ${formatPercent(snapshot.summary.funding_avg_8h_pct, 4)} · OI ${formatCompact(snapshot.summary.oi_total)}`;
-  syncState.textContent = currentInterval === '1h' ? 'Fast Tape' : currentInterval === '1d' ? 'Wide Context' : 'History Synced';
 
   operatorSummary.innerHTML = `
     <div class="rail-metric">
@@ -311,7 +355,34 @@ function renderCoverage(data) {
 
   const totalSignals = rows.reduce((sum, [, series]) => sum + (Array.isArray(series) ? series.length : 0), 0);
   dataHealth.textContent = totalSignals >= 700 ? 'Healthy' : 'Partial';
-  sessionWindow.textContent = `${barsLabel(data.spot.bars.length)} · ${formatTimestamp(lastPointTime(data.spot.bars))}`;
+  sessionWindow.textContent = state.replayEvent
+    ? `${state.replayEvent.title} · ${formatTimestamp(state.replayEvent.time)}`
+    : `${barsLabel(data.spot.bars.length)} · ${formatTimestamp(lastPointTime(data.spot.bars))}`;
+}
+
+function renderReplayEvents(events) {
+  replayList.innerHTML = (events || []).map((event) => `
+    <button class="replay-item ${state.replayEvent?.id === event.id ? 'active' : ''}" data-replay-id="${event.id}">
+      <div class="replay-item-head">
+        <span>${event.title}</span>
+        <span class="replay-focus-pill">${event.focus_mode}</span>
+      </div>
+      <div class="replay-item-time">${formatTimestamp(event.time)}</div>
+      <div class="replay-item-copy">${event.summary}</div>
+    </button>
+  `).join('');
+
+  if (!events?.length) {
+    replayList.innerHTML = '<div class="loading">No replay windows detected yet.</div>';
+  }
+
+  replayList.querySelectorAll('[data-replay-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const event = state.replayEvents.find((entry) => entry.id === button.dataset.replayId);
+      if (!event) return;
+      applyReplayEvent(event);
+    });
+  });
 }
 
 function makeChart(containerId, opts = {}) {
@@ -395,49 +466,108 @@ function createCharts() {
   ]);
 }
 
-function applyRanges(priceBars) {
-  const visibleRange = computeVisibleRange(priceBars, currentInterval);
+function setVisibleRange(range) {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       Object.values(charts).forEach(({ chart }) => {
         try {
-          chart.timeScale().setVisibleRange(visibleRange);
+          chart.timeScale().setVisibleRange(range);
         } catch (error) {
-          console.warn('initial visible range skipped', error);
+          console.warn('visible range skipped', error);
         }
       });
     });
   });
 }
 
+function applyRanges(priceBars) {
+  const range = state.replayEvent
+    ? buildReplayRange(state.replayEvent, state.interval)
+    : computeVisibleRange(priceBars, state.interval);
+  setVisibleRange(range);
+}
+
+function setFocusMode(mode, { preserveReplay = true } = {}) {
+  state.focusMode = mode;
+  focusButtons.forEach((button) => {
+    button.classList.toggle('active', button.dataset.focus === mode);
+  });
+
+  const focusMap = buildFocusMap(mode);
+  Object.entries(panelElements).forEach(([key, element]) => {
+    element.classList.toggle('panel-muted', !focusMap[key]);
+  });
+
+  if (!preserveReplay) {
+    state.replayEvent = null;
+    renderReplayEvents(state.replayEvents);
+  }
+
+  updateStatusHeadline();
+  if (state.payload) {
+    renderCoverage(state.payload);
+  }
+}
+
+function applyReplayEvent(event) {
+  state.replayEvent = event;
+  setFocusMode(event.focus_mode, { preserveReplay: true });
+  renderReplayEvents(state.replayEvents);
+  renderCoverage(state.payload);
+  updateStatusHeadline();
+  setVisibleRange(buildReplayRange(event, state.interval));
+}
+
+function clearReplayEvent() {
+  state.replayEvent = null;
+  renderReplayEvents(state.replayEvents);
+  updateStatusHeadline();
+  if (state.payload) {
+    renderCoverage(state.payload);
+    applyRanges(state.payload.spot.bars || []);
+  }
+}
+
 function updatePanelMeta(data) {
-  priceMeta.textContent = `${barsLabel(data.spot.bars.length)} · spot with perp overlays`;
+  priceMeta.textContent = state.replayEvent
+    ? `${barsLabel(data.spot.bars.length)} · replay window anchored`
+    : `${barsLabel(data.spot.bars.length)} · spot with perp overlays`;
   basisMeta.textContent = `${data.basis.aggregated.length} aggregated points · two venues`;
   oiMeta.textContent = `${data.oi.aggregated.length} aggregated points · leverage stack`;
   fundingMeta.textContent = `${(data.funding.per_source?.['binance-perp'] || []).length} resets · venue split`;
 }
 
 async function loadCockpit() {
-  const minutes = currentInterval === '1d'
+  const minutes = state.interval === '1d'
     ? 60 * 24 * 120
-    : currentInterval === '1h'
+    : state.interval === '1h'
       ? 60 * 24 * 14
       : 60 * 24 * 30;
 
-  const [snapshot, spot, perp, bybit, basis, oi, funding] = await Promise.all([
+  const [snapshot, spot, perp, bybit, basis, oi, funding, replay] = await Promise.all([
     fetchSnapshot(),
-    fetchOhlcv('binance-spot', minutes, currentInterval),
-    fetchOhlcv('binance-perp', minutes, currentInterval),
-    fetchOhlcv('bybit-perp', minutes, currentInterval),
-    fetchBasis(minutes * 60, currentInterval),
-    fetchOi(minutes, currentInterval),
-    fetchFunding(minutes * 60, INTERVAL_TO_SECONDS[currentInterval] || 14400)
+    fetchOhlcv('binance-spot', minutes, state.interval),
+    fetchOhlcv('binance-perp', minutes, state.interval),
+    fetchOhlcv('bybit-perp', minutes, state.interval),
+    fetchBasis(minutes * 60, state.interval),
+    fetchOi(minutes, state.interval),
+    fetchFunding(minutes * 60, INTERVAL_TO_SECONDS[state.interval] || 14400),
+    fetchReplayEvents(minutes * 60, state.interval, 6)
   ]);
 
-  const payload = { snapshot, spot, perp, bybit, basis, oi, funding };
+  const payload = { snapshot, spot, perp, bybit, basis, oi, funding, replay };
+  state.payload = payload;
+  state.replayEvents = replay.events || [];
+
+  if (state.replayEvent) {
+    state.replayEvent = state.replayEvents.find((event) => event.id === state.replayEvent.id) || null;
+  }
+
   renderSummary(snapshot);
   renderCoverage(payload);
+  renderReplayEvents(state.replayEvents);
   updatePanelMeta(payload);
+  updateStatusHeadline();
 
   const spotBars = spot.bars || [];
   charts.price.candles.setData(spotBars.map((bar) => ({
@@ -467,19 +597,31 @@ async function loadCockpit() {
   charts.funding.bybit.setData((funding.per_source?.['bybit-perp'] || []).map((point) => ({ time: point.time, value: point.rate_8h })));
 
   applyRanges(spotBars);
+  setFocusMode(state.focusMode, { preserveReplay: true });
 }
 
 intervalButtons.forEach((button) => {
   button.addEventListener('click', () => {
     intervalButtons.forEach((target) => target.classList.remove('active'));
     button.classList.add('active');
-    currentInterval = button.dataset.interval;
+    state.interval = button.dataset.interval;
     loadCockpit().catch((error) => {
       console.error(error);
       operatorSummary.innerHTML = `<span class="loading">${error.message}</span>`;
       dataHealth.textContent = 'Fault';
     });
   });
+});
+
+focusButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    setFocusMode(button.dataset.focus, { preserveReplay: true });
+  });
+});
+
+liveResetButton.addEventListener('click', () => {
+  clearReplayEvent();
+  setFocusMode('all', { preserveReplay: true });
 });
 
 createCharts();

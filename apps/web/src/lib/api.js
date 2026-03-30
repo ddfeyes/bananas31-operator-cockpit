@@ -29,3 +29,6 @@ export function fetchFunding(windowSecs = 60 * 60 * 24 * 30, intervalSecs = 60 *
   return getJson(`/history/funding?window_secs=${windowSecs}&interval_secs=${intervalSecs}`);
 }
 
+export function fetchReplayEvents(windowSecs = 60 * 60 * 24 * 30, interval = '4h', limit = 6) {
+  return getJson(`/replay/events?window_secs=${windowSecs}&interval=${interval}&limit=${limit}`);
+}
