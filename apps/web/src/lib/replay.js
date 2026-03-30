@@ -39,3 +39,12 @@ export function pickReplayModeLabel(event, focusMode = 'all') {
       return 'History Synced';
   }
 }
+
+export function summarizeReplayMetrics(event) {
+  const metrics = event?.metrics || {};
+  return {
+    basis: metrics.basis_pct == null ? '—' : `${Number(metrics.basis_pct).toFixed(2)}%`,
+    oiChange: metrics.oi_change_pct == null ? '—' : `${Number(metrics.oi_change_pct).toFixed(2)}%`,
+    funding: metrics.funding_8h_pct == null ? '—' : `${Number(metrics.funding_8h_pct).toFixed(4)}%`
+  };
+}

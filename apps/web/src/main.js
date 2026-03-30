@@ -4,7 +4,7 @@ import { fetchBasis, fetchFunding, fetchOhlcv, fetchOi, fetchReplayEvents, fetch
 import { computeVisibleRange, createActiveChartSync, INTERVAL_TO_SECONDS } from './lib/chartSync.js';
 import { matchHotkeyAction, readStoredCockpitPrefs, resolveReplayNeighbor, writeStoredCockpitPrefs } from './lib/cockpitState.js';
 import { formatCompact, formatPercent, formatPrice, getPricePrecision } from './lib/formatters.js';
-import { buildFocusMap, buildReplayRange, pickReplayModeLabel } from './lib/replay.js';
+import { buildFocusMap, buildReplayRange, pickReplayModeLabel, summarizeReplayMetrics } from './lib/replay.js';
 
 const app = document.querySelector('#app');
 
@@ -124,9 +124,9 @@ app.innerHTML = `
           <div class="panel-header">
             <div>
               <p class="panel-kicker">Replay</p>
-              <h2 class="panel-title">Signal Windows</h2>
+              <h2 class="panel-title">Replay Tape</h2>
             </div>
-            <span class="panel-meta">Context locks</span>
+            <span class="panel-meta" id="replay-meta">J/K step · Esc live</span>
           </div>
           <div class="replay-list" id="replay-list"></div>
         </article>
@@ -173,6 +173,7 @@ const sessionWindow = document.querySelector('#session-window');
 const sessionRange = document.querySelector('#session-range');
 const dataHealth = document.querySelector('#data-health');
 const syncState = document.querySelector('#sync-state');
+const replayMeta = document.querySelector('#replay-meta');
 const priceMeta = document.querySelector('#price-meta');
 const basisMeta = document.querySelector('#basis-meta');
 const oiMeta = document.querySelector('#oi-meta');
@@ -336,16 +337,28 @@ function renderCoverage(data) {
 }
 
 function renderReplayEvents(events) {
-  replayList.innerHTML = (events || []).map((event) => `
-    <button class="replay-item ${state.replayEvent?.id === event.id ? 'active' : ''}" data-replay-id="${event.id}">
-      <div class="replay-item-head">
-        <span>${event.title}</span>
-        <span class="replay-focus-pill">${event.focus_mode}</span>
-      </div>
-      <div class="replay-item-time">${formatTimestamp(event.time)}</div>
-      <div class="replay-item-copy">${event.summary}</div>
-    </button>
-  `).join('');
+  replayMeta.textContent = state.replayEvent
+    ? `${events?.length || 0} windows · locked`
+    : `${events?.length || 0} windows · latest first`;
+
+  replayList.innerHTML = (events || []).map((event) => {
+    const metrics = summarizeReplayMetrics(event);
+    return `
+      <button class="replay-item ${state.replayEvent?.id === event.id ? 'active' : ''}" data-replay-id="${event.id}">
+        <div class="replay-item-ledger">
+          <span class="replay-item-time">${formatTimestamp(event.time)}</span>
+          <span class="replay-item-title">${event.title}</span>
+          <span class="replay-focus-pill">${event.focus_mode}</span>
+        </div>
+        <div class="replay-item-metrics">
+          <span>B ${metrics.basis}</span>
+          <span>OI ${metrics.oiChange}</span>
+          <span>F ${metrics.funding}</span>
+        </div>
+        ${state.replayEvent?.id === event.id ? `<div class="replay-item-copy">${event.summary}</div>` : ''}
+      </button>
+    `;
+  }).join('');
 
   if (!events?.length) {
     replayList.innerHTML = '<div class="loading">No replay windows detected yet.</div>';
