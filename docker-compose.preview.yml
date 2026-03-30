@@ -11,7 +11,7 @@ services:
       - BANANAS31_DB_PATH=/app/data/aggdash.db
       - BANANAS31_WEB_DIST=/app/web-dist
     volumes:
-      - aggdash-data:/app/data:ro
+      - aggdash-data:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health')"]
       interval: 30s
