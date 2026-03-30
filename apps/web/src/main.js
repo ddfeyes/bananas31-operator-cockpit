@@ -3,6 +3,7 @@ import { createChart, CandlestickSeries, HistogramSeries, LineSeries } from 'lig
 import { fetchBasis, fetchFunding, fetchOhlcv, fetchOi, fetchReplayEvents, fetchSnapshot } from './lib/api.js';
 import { computeVisibleRange, createActiveChartSync, INTERVAL_TO_SECONDS } from './lib/chartSync.js';
 import { matchHotkeyAction, readStoredCockpitPrefs, resolveReplayNeighbor, writeStoredCockpitPrefs } from './lib/cockpitState.js';
+import { formatCompact, formatPercent, formatPrice, getPricePrecision } from './lib/formatters.js';
 import { buildFocusMap, buildReplayRange, pickReplayModeLabel } from './lib/replay.js';
 
 const app = document.querySelector('#app');
@@ -96,7 +97,7 @@ app.innerHTML = `
             <div class="panel-header">
               <div>
                 <p class="panel-kicker">Leverage</p>
-                <h2 class="panel-title">Open Interest</h2>
+                <h2 class="panel-title">Perp Open Interest</h2>
               </div>
               <span class="panel-meta" id="oi-meta">Aggregated and venue split</span>
             </div>
@@ -138,29 +139,31 @@ app.innerHTML = `
           </div>
           <div class="replay-list" id="replay-list"></div>
         </article>
-
-        <article class="panel rail-card">
-          <div class="panel-header">
-            <div>
-              <p class="panel-kicker">Coverage</p>
-              <h2 class="panel-title">Data Footprint</h2>
-            </div>
-            <span class="panel-meta">Bars and freshness</span>
-          </div>
-          <div class="coverage-list" id="coverage-list"></div>
-        </article>
-
-        <article class="panel rail-card">
-          <div class="panel-header">
-            <div>
-              <p class="panel-kicker">Reading</p>
-              <h2 class="panel-title">Session Thesis</h2>
-            </div>
-            <span class="panel-meta">What matters now</span>
-          </div>
-          <ul class="thesis-list" id="thesis-list"></ul>
-        </article>
       </aside>
+    </section>
+
+    <section class="support-grid">
+      <article class="panel support-card">
+        <div class="panel-header">
+          <div>
+            <p class="panel-kicker">Coverage</p>
+            <h2 class="panel-title">Data Footprint</h2>
+          </div>
+          <span class="panel-meta">Bars and freshness</span>
+        </div>
+        <div class="coverage-list" id="coverage-list"></div>
+      </article>
+
+      <article class="panel support-card">
+        <div class="panel-header">
+          <div>
+            <p class="panel-kicker">Reading</p>
+            <h2 class="panel-title">Session Thesis</h2>
+          </div>
+          <span class="panel-meta">What matters now</span>
+        </div>
+        <ul class="thesis-list" id="thesis-list"></ul>
+      </article>
     </section>
   </div>
 `;
@@ -216,25 +219,6 @@ function syncControlButtons() {
   focusButtons.forEach((button) => {
     button.classList.toggle('active', button.dataset.focus === state.focusMode);
   });
-}
-
-function formatNumber(value, digits = 4) {
-  if (value == null) return '—';
-  return Number(value).toFixed(digits);
-}
-
-function formatPercent(value, digits = 4) {
-  if (value == null) return '—';
-  return `${Number(value).toFixed(digits)}%`;
-}
-
-function formatCompact(value) {
-  if (value == null) return '—';
-  const abs = Math.abs(value);
-  if (abs >= 1e9) return `${(value / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `${(value / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3) return `${(value / 1e3).toFixed(2)}K`;
-  return `${value.toFixed(2)}`;
 }
 
 function formatTimestamp(timestamp) {
@@ -305,12 +289,12 @@ function updateStatusHeadline() {
 
 function renderSummary(snapshot) {
   const cards = [
-    ['Spot', formatNumber(snapshot.prices['binance-spot'], 6), 'Binance spot close'],
-    ['Perp', formatNumber(snapshot.prices['binance-perp'], 6), 'Binance perp close'],
-    ['Bybit', formatNumber(snapshot.prices['bybit-perp'], 6), 'Bybit perp close'],
+    ['Spot', formatPrice(snapshot.prices['binance-spot']), 'Binance spot close'],
+    ['Perp', formatPrice(snapshot.prices['binance-perp']), 'Binance perp close'],
+    ['Bybit', formatPrice(snapshot.prices['bybit-perp']), 'Bybit perp close'],
     ['Basis', formatPercent(snapshot.summary.basis_agg_pct, 4), 'Aggregated carry spread'],
     ['Funding', formatPercent(snapshot.summary.funding_avg_8h_pct, 4), 'Average 8h reset'],
-    ['OI', formatCompact(snapshot.summary.oi_total), 'Total open interest']
+    ['Perp OI', formatCompact(snapshot.summary.oi_total), 'Binance + Bybit perp total']
   ];
 
   summaryGrid.innerHTML = cards.map(([label, value, meta]) => `
@@ -323,28 +307,28 @@ function renderSummary(snapshot) {
 
   const regime = snapshot.summary.basis_agg_pct >= 0 ? 'Carry On / Contango' : 'Defensive / Backwardation';
   liveRegime.textContent = regime;
-  liveRegimeDetail.textContent = `Basis ${formatPercent(snapshot.summary.basis_agg_pct, 4)} · Funding ${formatPercent(snapshot.summary.funding_avg_8h_pct, 4)} · OI ${formatCompact(snapshot.summary.oi_total)}`;
+  liveRegimeDetail.textContent = `Basis ${formatPercent(snapshot.summary.basis_agg_pct, 4)} · Funding ${formatPercent(snapshot.summary.funding_avg_8h_pct, 4)} · Perp OI ${formatCompact(snapshot.summary.oi_total)}`;
 
   operatorSummary.innerHTML = `
     <div class="rail-metric">
       <span>Spot</span>
-      <strong>${formatNumber(snapshot.prices['binance-spot'], 6)}</strong>
+      <strong>${formatPrice(snapshot.prices['binance-spot'])}</strong>
     </div>
     <div class="rail-metric">
       <span>Perp</span>
-      <strong>${formatNumber(snapshot.prices['binance-perp'], 6)}</strong>
+      <strong>${formatPrice(snapshot.prices['binance-perp'])}</strong>
     </div>
     <div class="rail-metric">
       <span>Bybit</span>
-      <strong>${formatNumber(snapshot.prices['bybit-perp'], 6)}</strong>
+      <strong>${formatPrice(snapshot.prices['bybit-perp'])}</strong>
     </div>
     <div class="rail-metric">
       <span>DEX</span>
-      <strong>${formatNumber(snapshot.prices.dex, 6)}</strong>
+      <strong>${formatPrice(snapshot.prices.dex)}</strong>
     </div>
     <div class="rail-metric wide">
       <span>24H Range</span>
-      <strong>${formatNumber(snapshot.summary.low_24h, 6)} → ${formatNumber(snapshot.summary.high_24h, 6)}</strong>
+      <strong>${formatPrice(snapshot.summary.low_24h)} → ${formatPrice(snapshot.summary.high_24h)}</strong>
     </div>
   `;
 
@@ -359,7 +343,7 @@ function renderCoverage(data) {
     ['BN Perp', data.perp.bars, lastPointTime(data.perp.bars)],
     ['Bybit', data.bybit.bars, lastPointTime(data.bybit.bars)],
     ['Basis', data.basis.aggregated, lastPointTime(data.basis.aggregated)],
-    ['OI', data.oi.aggregated, lastPointTime(data.oi.aggregated)],
+    ['Perp OI', data.oi.aggregated, lastPointTime(data.oi.aggregated)],
     ['Funding', data.funding.per_source?.['binance-perp'] || [], lastPointTime(data.funding.per_source?.['binance-perp'] || [])]
   ];
 
@@ -476,7 +460,7 @@ function createCharts() {
   charts.oi = makeChart('#oi-chart');
   charts.oi.binance = charts.oi.chart.addSeries(LineSeries, { color: '#ffbc42', lineWidth: 1 });
   charts.oi.bybit = charts.oi.chart.addSeries(LineSeries, { color: '#9a7cff', lineWidth: 1 });
-  charts.oi.agg = charts.oi.chart.addSeries(LineSeries, { color: '#5ad1ff', lineWidth: 2 });
+  charts.oi.agg = charts.oi.chart.addSeries(LineSeries, { color: '#d7dde9', lineWidth: 2 });
 
   charts.funding = makeChart('#funding-chart');
   charts.funding.binance = charts.funding.chart.addSeries(LineSeries, { color: '#ffbc42', lineWidth: 1 });
@@ -568,7 +552,7 @@ function updatePanelMeta(data) {
     ? `${barsLabel(data.spot.bars.length)} · replay window anchored`
     : `${barsLabel(data.spot.bars.length)} · spot with perp overlays`;
   basisMeta.textContent = `${data.basis.aggregated.length} aggregated points · two venues`;
-  oiMeta.textContent = `${data.oi.aggregated.length} aggregated points · leverage stack`;
+  oiMeta.textContent = `${data.oi.aggregated.length} aggregated points · Binance + Bybit perp only`;
   fundingMeta.textContent = `${(data.funding.per_source?.['binance-perp'] || []).length} resets · venue split`;
 }
 
@@ -603,6 +587,20 @@ async function loadCockpit() {
   renderReplayEvents(state.replayEvents);
   updatePanelMeta(payload);
   updateStatusHeadline();
+
+  const pricePrecision = getPricePrecision([
+    ...(spot.bars || []),
+    ...(perp.bars || []).map((bar) => ({ value: bar.close })),
+    ...(bybit.bars || []).map((bar) => ({ value: bar.close }))
+  ]);
+  const precisePriceFormat = {
+    type: 'price',
+    precision: pricePrecision.precision,
+    minMove: pricePrecision.minMove
+  };
+  charts.price.candles.applyOptions({ priceFormat: precisePriceFormat });
+  charts.price.binancePerp.applyOptions({ priceFormat: precisePriceFormat });
+  charts.price.bybitPerp.applyOptions({ priceFormat: precisePriceFormat });
 
   const spotBars = spot.bars || [];
   charts.price.candles.setData(spotBars.map((bar) => ({
