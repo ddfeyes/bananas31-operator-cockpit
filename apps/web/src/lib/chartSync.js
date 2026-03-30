@@ -28,28 +28,34 @@ export function shouldIgnoreRangeSyncError(error) {
   return message.includes('Value is null');
 }
 
+function shouldIgnoreCrosshairSyncError(error) {
+  return shouldIgnoreRangeSyncError(error);
+}
+
 export function createActiveChartSync(entries) {
   const normalized = (entries || []).filter(Boolean);
   let activeChart = normalized[0]?.chart ?? null;
-  let syncEnabled = false;
-  let syncing = false;
+  let rangeSyncEnabled = false;
+  let suspended = false;
+  let syncingRange = false;
+  let syncingCrosshair = false;
 
-  normalized.forEach(({ chart, element }) => {
-    if (!chart) return;
-    const activate = () => {
+  const controller = {
+    suspend() {
+      suspended = true;
+    },
+    resume() {
+      suspended = false;
+    },
+    activate(chart) {
       activeChart = chart;
-      syncEnabled = true;
-    };
-    if (element?.addEventListener) {
-      ['pointerdown', 'wheel', 'mousedown', 'touchstart'].forEach((eventName) => {
-        element.addEventListener(eventName, activate, { passive: true });
-      });
-    }
-    chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-      if (!range || !syncEnabled || syncing || (activeChart && activeChart !== chart)) return;
-      syncing = true;
+      rangeSyncEnabled = true;
+    },
+    syncRange(range, sourceChart = activeChart) {
+      if (!range || suspended) return;
+      syncingRange = true;
       normalized.forEach((target) => {
-        if (target.chart === chart) return;
+        if (!target.chart || target.chart === sourceChart) return;
         try {
           target.chart.timeScale().setVisibleRange(range);
         } catch (error) {
@@ -58,7 +64,111 @@ export function createActiveChartSync(entries) {
           }
         }
       });
-      syncing = false;
+      syncingRange = false;
+    },
+    clearCrosshair(sourceChart = null) {
+      if (suspended) return;
+      syncingCrosshair = true;
+      normalized.forEach((target) => {
+        if (!target.chart || target.chart === sourceChart) return;
+        try {
+          target.chart.clearCrosshairPosition();
+        } catch (error) {
+          if (!shouldIgnoreCrosshairSyncError(error)) {
+            console.warn(`crosshair clear skipped for ${target.element?.id ?? 'chart'}`, error);
+          }
+        }
+      });
+      syncingCrosshair = false;
+    },
+    syncCrosshair(param, sourceChart) {
+      if (suspended || syncingCrosshair) return;
+      const time = param?.time;
+      if (!time) {
+        controller.clearCrosshair(sourceChart);
+        return;
+      }
+      syncingCrosshair = true;
+      normalized.forEach((target) => {
+        if (!target.chart || target.chart === sourceChart) return;
+        const point = target.lookupPoint?.(time);
+        if (!point || !Number.isFinite(point.value)) {
+          try {
+            target.chart.clearCrosshairPosition();
+          } catch (error) {
+            if (!shouldIgnoreCrosshairSyncError(error)) {
+              console.warn(`crosshair clear skipped for ${target.element?.id ?? 'chart'}`, error);
+            }
+          }
+          return;
+        }
+        try {
+          target.chart.setCrosshairPosition(point.value, point.time, target.crosshairSeries);
+        } catch (error) {
+          if (!shouldIgnoreCrosshairSyncError(error)) {
+            console.warn(`crosshair sync skipped for ${target.element?.id ?? 'chart'}`, error);
+          }
+        }
+      });
+      syncingCrosshair = false;
+    }
+  };
+
+  normalized.forEach(({ chart, element }) => {
+    if (!chart) return;
+    const activate = () => {
+      controller.activate(chart);
+    };
+    if (element?.addEventListener) {
+      ['pointerdown', 'wheel', 'mousedown', 'touchstart'].forEach((eventName) => {
+        element.addEventListener(eventName, activate, { passive: true });
+      });
+    }
+    chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
+      if (!range || suspended || !rangeSyncEnabled || syncingRange || (activeChart && activeChart !== chart)) return;
+      controller.syncRange(range, chart);
+    });
+    chart.subscribeCrosshairMove?.((param) => {
+      if (suspended) return;
+      controller.syncCrosshair(param, chart);
     });
   });
+
+  return controller;
+}
+
+export function createNearestPointLookup(points, valueAccessor = (point) => point?.value) {
+  const normalized = Array.isArray(points)
+    ? points
+        .map((point) => ({ time: Number(point?.time), value: Number(valueAccessor(point)) }))
+        .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value))
+    : [];
+
+  return (time) => {
+    const targetTime = Number(time);
+    if (!normalized.length || !Number.isFinite(targetTime)) {
+      return null;
+    }
+
+    let low = 0;
+    let high = normalized.length - 1;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const candidate = normalized[mid];
+      if (candidate.time === targetTime) {
+        return candidate;
+      }
+      if (candidate.time < targetTime) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+
+    const left = normalized[Math.max(0, high)];
+    const right = normalized[Math.min(normalized.length - 1, low)];
+    if (!left) return right ?? null;
+    if (!right) return left ?? null;
+    return Math.abs(targetTime - left.time) <= Math.abs(right.time - targetTime) ? left : right;
+  };
 }

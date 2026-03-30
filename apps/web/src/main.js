@@ -10,9 +10,15 @@ import {
   fetchSnapshot,
   probeCockpitIntervalSupport
 } from './lib/api.js';
-import { computeVisibleRange, createActiveChartSync, shouldIgnoreRangeSyncError } from './lib/chartSync.js';
+import {
+  computeVisibleRange,
+  createActiveChartSync,
+  createNearestPointLookup,
+  shouldIgnoreRangeSyncError
+} from './lib/chartSync.js';
 import { matchHotkeyAction, readStoredCockpitPrefs, resolveReplayNeighbor, writeStoredCockpitPrefs } from './lib/cockpitState.js';
 import { formatCompact, formatPercent, formatPrice, getPricePrecision } from './lib/formatters.js';
+import { DEFAULT_LAYOUT_STATE, readStoredLayoutState, rebalancePairWeights, writeStoredLayoutState } from './lib/layoutState.js';
 import {
   buildFocusMap,
   buildReplayRange,
@@ -60,11 +66,13 @@ app.innerHTML = `
         <button data-interval="1d">1D</button>
       </div>
 
-      <div class="toolbar-group focus-group" id="focus-group">
-        <button data-focus="all" class="active">All</button>
-        <button data-focus="basis">Carry</button>
-        <button data-focus="leverage">Leverage</button>
-        <button data-focus="funding">Funding</button>
+      <div class="toolbar-group panel-group" id="panel-group">
+        <button data-panel-toggle="basis" class="active">Basis</button>
+        <button data-panel-toggle="oi" class="active">Perp OI</button>
+        <button data-panel-toggle="funding" class="active">Funding</button>
+        <button data-panel-toggle="replay" class="active">Incidents</button>
+        <button data-panel-toggle="coverage" class="active">Coverage</button>
+        <button data-panel-toggle="reading" class="active">Pulse</button>
       </div>
 
       <div class="toolbar-group mode-group" id="mode-group">
@@ -85,7 +93,9 @@ app.innerHTML = `
           <div class="chart-slot chart-slot-hero" id="price-chart"></div>
         </article>
 
-        <div class="analytics-row">
+        <div class="row-resizer" id="hero-resizer" data-resize-group="hero" role="separator" aria-label="Resize chart stage"></div>
+
+        <div class="analytics-row" id="analytics-row">
           <article class="panel" id="basis-panel">
             <div class="panel-header">
               <div>
@@ -96,15 +106,26 @@ app.innerHTML = `
             <div class="chart-slot chart-slot-compact" id="basis-chart"></div>
           </article>
 
+          <div class="panel-splitter" data-resize-group="analytics" data-left="basis" data-right="oi" role="separator" aria-label="Resize basis and OI panels"></div>
+
           <article class="panel" id="oi-panel">
             <div class="panel-header">
               <div>
                 <h2 class="panel-title">Perp OI</h2>
               </div>
-              <span class="panel-meta" id="oi-meta">Aggregated and venue split</span>
+              <div class="panel-header-actions">
+                <div class="series-toggle-group" id="oi-toggle-group">
+                  <button data-oi-series="agg" class="active">Agg</button>
+                  <button data-oi-series="binance" class="active">BN</button>
+                  <button data-oi-series="bybit">BY</button>
+                </div>
+                <span class="panel-meta" id="oi-meta">Aggregated and venue split</span>
+              </div>
             </div>
             <div class="chart-slot chart-slot-compact" id="oi-chart"></div>
           </article>
+
+          <div class="panel-splitter" data-resize-group="analytics" data-left="oi" data-right="funding" role="separator" aria-label="Resize OI and funding panels"></div>
 
           <article class="panel" id="funding-panel">
             <div class="panel-header">
@@ -119,14 +140,16 @@ app.innerHTML = `
       </div>
     </section>
 
-    <section class="support-grid">
+    <section class="support-grid" id="support-grid">
       <article class="support-card support-cluster support-replay">
         <div class="support-head">
-          <p class="support-kicker">Replay</p>
+          <p class="support-kicker">Incidents</p>
           <span class="support-meta" id="replay-meta">6 windows</span>
         </div>
         <div class="replay-list" id="replay-list"></div>
       </article>
+
+      <div class="panel-splitter panel-splitter-support" data-resize-group="support" data-left="replay" data-right="coverage" role="separator" aria-label="Resize incidents and coverage panels"></div>
 
       <article class="support-card support-cluster">
         <div class="support-head">
@@ -140,13 +163,15 @@ app.innerHTML = `
         <div class="coverage-list" id="coverage-list"></div>
       </article>
 
+      <div class="panel-splitter panel-splitter-support" data-resize-group="support" data-left="coverage" data-right="reading" role="separator" aria-label="Resize coverage and pulse panels"></div>
+
       <article class="support-card support-cluster">
         <div class="support-head">
-          <p class="support-kicker">Reading</p>
+          <p class="support-kicker">Pulse</p>
           <div class="support-columns thesis-columns">
-            <span>Signal</span>
-            <span>State</span>
-            <span>Value</span>
+            <span>Metric</span>
+            <span>Read</span>
+            <span>Now</span>
           </div>
         </div>
         <ul class="thesis-list" id="thesis-list"></ul>
@@ -161,6 +186,7 @@ const coverageList = document.querySelector('#coverage-list');
 const thesisList = document.querySelector('#thesis-list');
 const intervalButtons = [...document.querySelectorAll('[data-interval]')];
 const focusButtons = [...document.querySelectorAll('[data-focus]')];
+const panelToggleButtons = [...document.querySelectorAll('[data-panel-toggle]')];
 const liveResetButton = document.querySelector('[data-live-reset]');
 const replayIndicatorButton = document.querySelector('[data-replay-indicator]');
 const liveRegime = document.querySelector('#live-regime');
@@ -171,16 +197,29 @@ const priceMeta = document.querySelector('#price-meta');
 const basisMeta = document.querySelector('#basis-meta');
 const oiMeta = document.querySelector('#oi-meta');
 const fundingMeta = document.querySelector('#funding-meta');
+const analyticsRow = document.querySelector('#analytics-row');
+const supportGrid = document.querySelector('#support-grid');
+const chartStage = document.querySelector('.chart-stage');
+const heroResizer = document.querySelector('#hero-resizer');
+const analyticsSplitters = [...document.querySelectorAll('[data-resize-group="analytics"]')];
+const supportSplitters = [...document.querySelectorAll('[data-resize-group="support"]')];
+const oiSeriesButtons = [...document.querySelectorAll('[data-oi-series]')];
 const DEFAULT_INTERVAL = '4h';
 const BASE_INTERVALS = new Set(['1h', '4h', '1d']);
+const MIN_PANEL_WEIGHT = 0.18;
 
 const charts = {};
+let chartSyncController = null;
 const persistedPrefs = readStoredCockpitPrefs();
+const persistedLayout = readStoredLayoutState();
 const panelElements = {
   price: document.querySelector('#price-panel'),
   basis: document.querySelector('#basis-panel'),
   oi: document.querySelector('#oi-panel'),
-  funding: document.querySelector('#funding-panel')
+  funding: document.querySelector('#funding-panel'),
+  replay: document.querySelector('.support-replay'),
+  coverage: document.querySelector('#coverage-list')?.closest('.support-card'),
+  reading: document.querySelector('#thesis-list')?.closest('.support-card')
 };
 
 const state = {
@@ -192,7 +231,15 @@ const state = {
   payload: null,
   healthLabel: 'Connecting',
   windowLabel: 'Waiting',
-  loadRequestId: 0
+  loadRequestId: 0,
+  layout: persistedLayout,
+  hoveredTime: null,
+  chartLookups: {
+    price: () => null,
+    basis: () => null,
+    oi: () => null,
+    funding: () => null,
+  },
 };
 
 function persistCockpitPrefs() {
@@ -200,6 +247,10 @@ function persistCockpitPrefs() {
     interval: state.interval,
     focusMode: state.focusMode
   });
+}
+
+function persistLayoutState() {
+  writeStoredLayoutState(undefined, state.layout);
 }
 
 function syncControlButtons() {
@@ -213,12 +264,109 @@ function syncControlButtons() {
   focusButtons.forEach((button) => {
     button.classList.toggle('active', button.dataset.focus === state.focusMode);
   });
+  panelToggleButtons.forEach((button) => {
+    const key = button.dataset.panelToggle;
+    const visible = state.layout.panels[key] !== false;
+    button.classList.toggle('active', visible);
+  });
+  oiSeriesButtons.forEach((button) => {
+    const key = button.dataset.oiSeries;
+    button.classList.toggle('active', state.layout.oiSeries[key] !== false);
+  });
 }
 
 function syncIntervalLoadingState(loading) {
   intervalButtons.forEach((button) => {
     button.disabled = loading || !state.supportedIntervals.has(button.dataset.interval);
   });
+}
+
+function visiblePanelKeys(group) {
+  const keys = group === 'analytics'
+    ? ['basis', 'oi', 'funding']
+    : ['replay', 'coverage', 'reading'];
+  const visible = keys.filter((key) => state.layout.panels[key] !== false);
+  return visible.length ? visible : [keys[0]];
+}
+
+function applyFlexWeights(container, keys, weights) {
+  container.style.setProperty('--visible-count', String(keys.length));
+  keys.forEach((key) => {
+    const element = panelElements[key];
+    if (!element) return;
+    element.hidden = false;
+    element.style.flex = `${weights[key] || 1} 1 0px`;
+  });
+}
+
+function updateSplitterVisibility(splitters, visibleKeys) {
+  splitters.forEach((splitter) => {
+    const left = splitter.dataset.left;
+    const right = splitter.dataset.right;
+    splitter.hidden = !(visibleKeys.includes(left) && visibleKeys.includes(right));
+  });
+}
+
+function applyLayoutState() {
+  chartStage?.style.setProperty('--hero-height', `${state.layout.heroHeight}px`);
+
+  const visibleAnalytics = visiblePanelKeys('analytics');
+  const visibleSupport = visiblePanelKeys('support');
+
+  ['basis', 'oi', 'funding'].forEach((key) => {
+    const element = panelElements[key];
+    if (!element) return;
+    element.hidden = !visibleAnalytics.includes(key);
+  });
+  ['replay', 'coverage', 'reading'].forEach((key) => {
+    const element = panelElements[key];
+    if (!element) return;
+    element.hidden = !visibleSupport.includes(key);
+  });
+
+  applyFlexWeights(analyticsRow, visibleAnalytics, state.layout.analyticsWeights);
+  applyFlexWeights(supportGrid, visibleSupport, state.layout.supportWeights);
+  updateSplitterVisibility(analyticsSplitters, visibleAnalytics);
+  updateSplitterVisibility(supportSplitters, visibleSupport);
+  syncControlButtons();
+}
+
+function togglePanel(key) {
+  if (!(key in state.layout.panels)) return;
+  const groupKeys = key === 'basis' || key === 'oi' || key === 'funding'
+    ? ['basis', 'oi', 'funding']
+    : ['replay', 'coverage', 'reading'];
+  const currentlyVisible = groupKeys.filter((panelKey) => state.layout.panels[panelKey] !== false);
+  if (currentlyVisible.length === 1 && currentlyVisible[0] === key) {
+    return;
+  }
+  state.layout.panels[key] = !(state.layout.panels[key] !== false);
+  persistLayoutState();
+  applyLayoutState();
+}
+
+function toggleOiSeries(key) {
+  if (!(key in state.layout.oiSeries)) return;
+  const active = Object.entries(state.layout.oiSeries)
+    .filter(([, value]) => value !== false)
+    .map(([seriesKey]) => seriesKey);
+  if (active.length === 1 && active[0] === key) {
+    return;
+  }
+  state.layout.oiSeries[key] = !(state.layout.oiSeries[key] !== false);
+  applyOiSeriesVisibility();
+  if (state.payload) {
+    const oi = state.payload.oi;
+    const activeOiSeries = state.layout.oiSeries.agg !== false
+      ? (oi.aggregated || [])
+      : state.layout.oiSeries.binance !== false
+        ? (oi.per_source?.['binance-perp'] || [])
+        : (oi.per_source?.['bybit-perp'] || []);
+    state.chartLookups.oi = createNearestPointLookup(activeOiSeries, (point) => point.value);
+    updatePanelMeta(state.payload);
+  }
+  persistLayoutState();
+  syncControlButtons();
 }
 
 async function hydrateOptionalIntervals() {
@@ -233,6 +381,73 @@ async function hydrateOptionalIntervals() {
     }
   }
   syncControlButtons();
+}
+
+function installResizer(handle, group, leftKey, rightKey) {
+  if (!handle) return;
+  handle.addEventListener('pointerdown', (event) => {
+    const visibleKeys = visiblePanelKeys(group);
+    if (!(visibleKeys.includes(leftKey) && visibleKeys.includes(rightKey))) {
+      return;
+    }
+
+    const container = group === 'analytics' ? analyticsRow : supportGrid;
+    const leftElement = panelElements[leftKey];
+    const rightElement = panelElements[rightKey];
+    if (!container || !leftElement || !rightElement) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const leftRect = leftElement.getBoundingClientRect();
+    const rightRect = rightElement.getBoundingClientRect();
+    const totalWidth = leftRect.width + rightRect.width;
+    const startX = event.clientX;
+    const startLeft = leftRect.width;
+    const weightKey = group === 'analytics' ? 'analyticsWeights' : 'supportWeights';
+    const currentWeights = state.layout[weightKey];
+    const pairWeight = (currentWeights[leftKey] || 0.5) + (currentWeights[rightKey] || 0.5);
+
+    const move = (moveEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const minWidth = Math.max(containerRect.width * MIN_PANEL_WEIGHT, 180);
+      const nextLeft = Math.min(totalWidth - minWidth, Math.max(minWidth, startLeft + delta));
+      const ratio = nextLeft / totalWidth;
+      state.layout[weightKey] = rebalancePairWeights({
+        ...state.layout[weightKey],
+        [leftKey]: pairWeight / 2,
+        [rightKey]: pairWeight / 2,
+      }, leftKey, rightKey, ratio);
+      applyLayoutState();
+    };
+
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      persistLayoutState();
+    };
+
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up, { once: true });
+  });
+}
+
+function installHeroResizer() {
+  if (!heroResizer || !chartStage) return;
+  heroResizer.addEventListener('pointerdown', (event) => {
+    const startY = event.clientY;
+    const startHeight = state.layout.heroHeight;
+    const move = (moveEvent) => {
+      const delta = moveEvent.clientY - startY;
+      state.layout.heroHeight = Math.round(Math.min(960, Math.max(320, startHeight + delta)));
+      applyLayoutState();
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      persistLayoutState();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up, { once: true });
+  });
 }
 
 function formatTimestamp(timestamp) {
@@ -309,23 +524,23 @@ function deriveSessionThesis(snapshot) {
   const items = [];
 
   if (basis < 0) {
-    items.push({ label: 'Carry', state: 'Defensive', value: formatPercent(basis, 2) });
+    items.push({ label: 'Carry spread', state: 'Defensive', value: formatPercent(basis, 2) });
   } else {
-    items.push({ label: 'Carry', state: 'Engaged', value: formatPercent(basis, 2) });
+    items.push({ label: 'Carry spread', state: 'Engaged', value: formatPercent(basis, 2) });
   }
 
   if (funding > 0.05) {
-    items.push({ label: 'Funding', state: 'Hot', value: formatPercent(funding, 4) });
+    items.push({ label: 'Funding pressure', state: 'Hot', value: formatPercent(funding, 4) });
   } else if (funding < 0) {
-    items.push({ label: 'Funding', state: 'Negative', value: 'Squeeze' });
+    items.push({ label: 'Funding pressure', state: 'Negative', value: 'Squeeze' });
   } else {
-    items.push({ label: 'Funding', state: 'Calm', value: formatPercent(funding, 4) });
+    items.push({ label: 'Funding pressure', state: 'Calm', value: formatPercent(funding, 4) });
   }
 
   if (oi >= 7_500_000_000) {
-    items.push({ label: 'Leverage', state: 'Heavy', value: formatCompact(oi) });
+    items.push({ label: 'Perp positioning', state: 'Heavy', value: formatCompact(oi) });
   } else {
-    items.push({ label: 'Leverage', state: 'Moderate', value: formatCompact(oi) });
+    items.push({ label: 'Perp positioning', state: 'Moderate', value: formatCompact(oi) });
   }
 
   return items;
@@ -407,8 +622,8 @@ function renderCoverage(data) {
 
 function renderReplayEvents(events) {
   replayMeta.textContent = state.replayEvent
-    ? `${events?.length || 0} windows · lock`
-    : `${events?.length || 0} windows`;
+    ? `${events?.length || 0} incidents · lock`
+    : `${events?.length || 0} incidents`;
 
   replayList.innerHTML = (events || []).map((event) => {
     const metrics = summarizeReplayMetrics(event);
@@ -420,16 +635,16 @@ function renderReplayEvents(events) {
           <span class="replay-focus-pill">${compactReplayFocus(event.focus_mode)}</span>
         </div>
         <div class="replay-item-metrics">
-          <span>B ${metrics.basis}</span>
+          <span>Basis ${metrics.basis}</span>
           <span>OI ${metrics.oiChange}</span>
-          <span>F ${metrics.funding}</span>
+          <span>Funding ${metrics.funding}</span>
         </div>
       </button>
     `;
   }).join('');
 
   if (!events?.length) {
-    replayList.innerHTML = '<div class="loading">No replay windows detected yet.</div>';
+    replayList.innerHTML = '<div class="loading">No incidents detected yet.</div>';
   }
 
   replayList.querySelectorAll('[data-replay-id]').forEach((button) => {
@@ -554,6 +769,7 @@ function createCharts() {
   charts.oi.bybit = charts.oi.chart.addSeries(LineSeries, {
     color: '#9a7cff',
     lineWidth: 1,
+    priceScaleId: 'left',
     priceFormat: oiFormat,
     lastValueVisible: false,
     priceLineVisible: false,
@@ -564,6 +780,10 @@ function createCharts() {
     priceFormat: oiFormat,
     lastValueVisible: false,
     priceLineVisible: false,
+  });
+  charts.oi.chart.priceScale('left').applyOptions({
+    visible: false,
+    scaleMargins: { top: 0.1, bottom: 0.1 },
   });
 
   charts.funding = makeChart('#funding-chart');
@@ -592,20 +812,45 @@ function createCharts() {
     }
   });
 
-  createActiveChartSync([
-    charts.price,
-    charts.basis,
-    charts.oi,
-    charts.funding
+  chartSyncController = createActiveChartSync([
+    {
+      ...charts.price,
+      crosshairSeries: charts.price.candles,
+      lookupPoint: (time) => state.chartLookups.price(time),
+    },
+    {
+      ...charts.basis,
+      crosshairSeries: charts.basis.agg,
+      lookupPoint: (time) => state.chartLookups.basis(time),
+    },
+    {
+      ...charts.oi,
+      crosshairSeries: charts.oi.agg,
+      lookupPoint: (time) => state.chartLookups.oi(time),
+    },
+    {
+      ...charts.funding,
+      crosshairSeries: charts.funding.binance,
+      lookupPoint: (time) => state.chartLookups.funding(time),
+    }
   ]);
+}
+
+function applyOiSeriesVisibility() {
+  if (!charts.oi?.agg) return;
+  charts.oi.agg.applyOptions({ visible: state.layout.oiSeries.agg !== false });
+  charts.oi.binance.applyOptions({ visible: state.layout.oiSeries.binance !== false });
+  charts.oi.bybit.applyOptions({ visible: state.layout.oiSeries.bybit === true });
 }
 
 function setVisibleRange(range) {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       let fallbackToFitContent = false;
+      chartSyncController?.suspend();
       Object.values(charts).forEach(({ chart }) => {
         try {
+          chart.timeScale().fitContent();
           chart.timeScale().setVisibleRange(range);
         } catch (error) {
           fallbackToFitContent = true;
@@ -625,6 +870,9 @@ function setVisibleRange(range) {
           }
         });
       }
+      chartSyncController?.activate(charts.price?.chart);
+      chartSyncController?.resume();
+      chartSyncController?.syncRange(range, charts.price?.chart);
     });
   });
 }
@@ -694,6 +942,11 @@ function updatePanelMeta(data) {
   const latestOiAgg = latestPoint(data.oi.aggregated);
   const latestOiBinance = latestPoint(data.oi.per_source?.['binance-perp'] || []);
   const latestOiBybit = latestPoint(data.oi.per_source?.['bybit-perp'] || []);
+  const oiSources = [
+    state.layout.oiSeries.agg !== false ? 'Agg' : null,
+    state.layout.oiSeries.binance !== false ? 'BN' : null,
+    state.layout.oiSeries.bybit === true ? 'BY' : null,
+  ].filter(Boolean).join(' · ');
   const fundingLatest = ['binance-perp', 'bybit-perp']
     .map((source) => data.funding.per_source?.[source]?.at(-1)?.rate_8h)
     .filter((value) => value != null)
@@ -702,7 +955,7 @@ function updatePanelMeta(data) {
     ? `${data.spot.bars.length} ${state.interval.toUpperCase()} · replay lock`
     : `${data.spot.bars.length} ${state.interval.toUpperCase()} · spot + perp + dex`;
   basisMeta.textContent = `${data.basis.aggregated.length} agg · ${formatPercent(latestBasis?.value, 2)}`;
-  oiMeta.textContent = `${formatCompact(latestOiAgg?.value)} agg · BN ${formatCompact(latestOiBinance?.value)} · BY ${formatCompact(latestOiBybit?.value)}`;
+  oiMeta.textContent = `${oiSources || 'No sources'} · ${formatCompact(latestOiAgg?.value)} agg · BN ${formatCompact(latestOiBinance?.value)} · BY ${formatCompact(latestOiBybit?.value)}`;
   const fundingCount = Math.max(
     data.funding.per_source?.['binance-perp']?.length || 0,
     data.funding.per_source?.['bybit-perp']?.length || 0
@@ -792,15 +1045,32 @@ async function loadCockpit() {
     charts.oi.binance.setData((oi.per_source?.['binance-perp'] || []).map((point) => ({ time: point.time, value: point.value })));
     charts.oi.bybit.setData((oi.per_source?.['bybit-perp'] || []).map((point) => ({ time: point.time, value: point.value })));
     charts.oi.agg.setData((oi.aggregated || []).map((point) => ({ time: point.time, value: point.value })));
+    applyOiSeriesVisibility();
 
     charts.funding.binance.setData((funding.per_source?.['binance-perp'] || []).map((point) => ({ time: point.time, value: point.rate_8h * 100 })));
     charts.funding.bybit.setData((funding.per_source?.['bybit-perp'] || []).map((point) => ({ time: point.time, value: point.rate_8h * 100 })));
+
+    state.chartLookups.price = createNearestPointLookup(spotBars, (point) => point.close);
+    state.chartLookups.basis = createNearestPointLookup(basis.aggregated || [], (point) => point.value);
+    const activeOiSeries = state.layout.oiSeries.agg !== false
+      ? (oi.aggregated || [])
+      : state.layout.oiSeries.binance !== false
+        ? (oi.per_source?.['binance-perp'] || [])
+        : (oi.per_source?.['bybit-perp'] || []);
+    state.chartLookups.oi = createNearestPointLookup(activeOiSeries, (point) => point.value);
+    state.chartLookups.funding = createNearestPointLookup(
+      funding.per_source?.['binance-perp']?.length
+        ? funding.per_source['binance-perp'].map((point) => ({ time: point.time, value: point.rate_8h * 100 }))
+        : (funding.per_source?.['bybit-perp'] || []).map((point) => ({ time: point.time, value: point.rate_8h * 100 })),
+      (point) => point.value
+    );
 
     applyRanges(spotBars);
     setFocusMode(state.focusMode, { preserveReplay: true });
   } finally {
     if (requestId === state.loadRequestId) {
       syncIntervalLoadingState(false);
+      chartSyncController?.resume();
     }
   }
 }
@@ -810,6 +1080,16 @@ function selectInterval(interval) {
     return;
   }
 
+  chartSyncController?.suspend();
+  Object.values(charts).forEach(({ chart }) => {
+    try {
+      chart.clearCrosshairPosition?.();
+    } catch (error) {
+      if (!shouldIgnoreRangeSyncError(error)) {
+        console.warn('crosshair clear skipped', error);
+      }
+    }
+  });
   state.interval = interval;
   state.replayEvent = null;
   state.replayEvents = [];
@@ -831,9 +1111,21 @@ intervalButtons.forEach((button) => {
   });
 });
 
+panelToggleButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    togglePanel(button.dataset.panelToggle);
+  });
+});
+
 focusButtons.forEach((button) => {
   button.addEventListener('click', () => {
     setFocusMode(button.dataset.focus, { preserveReplay: true });
+  });
+});
+
+oiSeriesButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    toggleOiSeries(button.dataset.oiSeries);
   });
 });
 
@@ -870,6 +1162,14 @@ window.addEventListener('keydown', (event) => {
 });
 
 createCharts();
+installHeroResizer();
+analyticsSplitters.forEach((splitter) => {
+  installResizer(splitter, 'analytics', splitter.dataset.left, splitter.dataset.right);
+});
+supportSplitters.forEach((splitter) => {
+  installResizer(splitter, 'support', splitter.dataset.left, splitter.dataset.right);
+});
+applyLayoutState();
 syncControlButtons();
 hydrateOptionalIntervals()
   .then(() => loadCockpit())
