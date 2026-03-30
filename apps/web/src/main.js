@@ -68,8 +68,6 @@ app.innerHTML = `
         <button data-live-reset class="active">Live</button>
         <button data-replay-indicator disabled>Replay Idle</button>
       </div>
-
-      <div class="command-note" id="command-note">1/2/3 · A/C/L/F · J/K · Esc</div>
     </section>
 
     <section class="workspace-grid">
@@ -77,7 +75,6 @@ app.innerHTML = `
         <article class="panel panel-hero" id="price-panel">
           <div class="panel-header">
             <div>
-              <p class="panel-kicker">Core Tape</p>
               <h2 class="panel-title">Price + Volume</h2>
             </div>
             <span class="panel-meta" id="price-meta">Historical candlesticks + perp overlays</span>
@@ -159,7 +156,6 @@ const intervalButtons = [...document.querySelectorAll('[data-interval]')];
 const focusButtons = [...document.querySelectorAll('[data-focus]')];
 const liveResetButton = document.querySelector('[data-live-reset]');
 const replayIndicatorButton = document.querySelector('[data-replay-indicator]');
-const commandNote = document.querySelector('#command-note');
 const liveRegime = document.querySelector('#live-regime');
 const sessionWindow = document.querySelector('#session-window');
 const sessionRange = document.querySelector('#session-range');
@@ -261,13 +257,10 @@ function deriveSessionThesis(snapshot) {
 function updateStatusHeadline() {
   syncState.textContent = pickReplayModeLabel(state.replayEvent, state.focusMode);
   replayIndicatorButton.textContent = state.replayEvent
-    ? `${state.replayEvent.title} · ${formatTimestamp(state.replayEvent.time)}`
-    : 'Replay';
+    ? compactReplayFocus(state.replayEvent.focus_mode)
+    : 'Idle';
   replayIndicatorButton.classList.toggle('active', Boolean(state.replayEvent));
   liveResetButton.classList.toggle('active', !state.replayEvent);
-  commandNote.textContent = state.replayEvent
-    ? `J/K · Esc · ${state.interval.toUpperCase()}`
-    : '1/2/3 · A/C/L/F · J/K · Esc';
 }
 
 function renderSummary(snapshot) {

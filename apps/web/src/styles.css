@@ -200,22 +200,13 @@ body::before {
 
 .command-deck {
   display: grid;
-  grid-template-columns: auto auto auto 1fr;
-  gap: 8px 12px;
-  margin-bottom: 5px;
+  grid-template-columns: auto auto 1fr;
+  gap: 6px 12px;
+  margin-bottom: 4px;
   align-items: center;
-  padding: 3px 0 4px;
+  padding: 2px 0 4px;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-}
-
-.command-note {
-  justify-self: end;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 8px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
 }
 
 .toolbar-group {
@@ -224,6 +215,10 @@ body::before {
   gap: 8px;
   padding: 0;
   align-items: center;
+}
+
+.mode-group {
+  justify-self: end;
 }
 
 .toolbar-group button {
@@ -271,7 +266,7 @@ body::before {
 .chart-stage,
 .command-rail {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   align-content: start;
   align-items: start;
 }
@@ -305,8 +300,8 @@ body::before {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 8px;
-  padding: 0 0 1px;
+  gap: 6px;
+  padding: 0;
 }
 
 .panel-title {
@@ -319,7 +314,7 @@ body::before {
 }
 
 .panel-meta {
-  padding-top: 2px;
+  padding-top: 1px;
   color: var(--muted);
   font-size: 8px;
   line-height: 1.35;
