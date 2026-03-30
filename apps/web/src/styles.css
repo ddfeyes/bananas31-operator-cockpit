@@ -488,8 +488,7 @@ body::before {
   opacity: 0.82;
 }
 
-.replay-item-ledger,
-.replay-item-metrics {
+.replay-item-ledger {
   display: grid;
   gap: 8px;
   align-items: baseline;
@@ -529,16 +528,12 @@ body::before {
 }
 
 .replay-item-metrics {
-  grid-template-columns: 64px minmax(0, 1fr);
   margin-top: 1px;
+  margin-left: 72px;
   font-family: var(--mono);
   font-size: 8px;
   letter-spacing: 0.06em;
   color: var(--muted);
-}
-
-.replay-item-metrics {
-  grid-column: 2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

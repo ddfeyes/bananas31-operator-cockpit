@@ -10,7 +10,7 @@ import {
   compactReplayFocus,
   formatReplayTimestamp,
   pickReplayModeLabel,
-  summarizeReplayMetrics
+  summarizeReplayLine
 } from './lib/replay.js';
 
 const app = document.querySelector('#app');
@@ -344,7 +344,7 @@ function renderReplayEvents(events) {
     : `${events?.length || 0} latest`;
 
   replayList.innerHTML = (events || []).map((event) => {
-    const metrics = summarizeReplayMetrics(event);
+    const metricLine = summarizeReplayLine(event);
     return `
       <button class="replay-item ${state.replayEvent?.id === event.id ? 'active' : ''}" data-replay-id="${event.id}">
         <div class="replay-item-ledger">
@@ -352,9 +352,7 @@ function renderReplayEvents(events) {
           <span class="replay-item-title">${event.title}</span>
           <span class="replay-focus-pill">${compactReplayFocus(event.focus_mode)}</span>
         </div>
-        <div class="replay-item-metrics">
-          <span class="replay-item-metric-line">B ${metrics.basis} · OI ${metrics.oiChange} · F ${metrics.funding}</span>
-        </div>
+        <div class="replay-item-metrics">${metricLine}</div>
         ${state.replayEvent?.id === event.id ? `<div class="replay-item-copy">${event.summary}</div>` : ''}
       </button>
     `;
