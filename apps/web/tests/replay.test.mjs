@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFocusMap, buildReplayRange, pickReplayModeLabel, summarizeReplayMetrics } from '../src/lib/replay.js';
+import {
+  buildFocusMap,
+  buildReplayRange,
+  compactReplayFocus,
+  formatReplayTimestamp,
+  pickReplayModeLabel,
+  summarizeReplayLine,
+  summarizeReplayMetrics
+} from '../src/lib/replay.js';
 
 test('buildReplayRange prefers explicit replay windows', () => {
   const range = buildReplayRange({
@@ -47,6 +55,16 @@ test('pickReplayModeLabel reflects live versus locked replay state', () => {
   assert.equal(pickReplayModeLabel(null, 'funding'), 'Reset Focus');
 });
 
+test('formatReplayTimestamp keeps replay rows compact', () => {
+  assert.equal(formatReplayTimestamp(1_710_000_000), 'Mar 9 · 16:00');
+});
+
+test('compactReplayFocus shortens verbose mode labels', () => {
+  assert.equal(compactReplayFocus('basis'), 'Carry');
+  assert.equal(compactReplayFocus('leverage'), 'Lev');
+  assert.equal(compactReplayFocus('funding'), 'Reset');
+});
+
 test('summarizeReplayMetrics formats the ledger columns deterministically', () => {
   assert.deepEqual(
     summarizeReplayMetrics({
@@ -61,5 +79,18 @@ test('summarizeReplayMetrics formats the ledger columns deterministically', () =
       oiChange: '12.71%',
       funding: '0.0320%'
     }
+  );
+});
+
+test('summarizeReplayLine keeps replay rows dense but truthful', () => {
+  assert.equal(
+    summarizeReplayLine({
+      metrics: {
+        basis_pct: -11.5794,
+        oi_change_pct: 12.7137,
+        funding_8h_pct: 0.032
+      }
+    }),
+    'B -11.58% · OI 12.71% · F 0.0320%'
   );
 });

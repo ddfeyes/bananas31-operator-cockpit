@@ -4,7 +4,14 @@ import { fetchBasis, fetchFunding, fetchOhlcv, fetchOi, fetchReplayEvents, fetch
 import { computeVisibleRange, createActiveChartSync, INTERVAL_TO_SECONDS } from './lib/chartSync.js';
 import { matchHotkeyAction, readStoredCockpitPrefs, resolveReplayNeighbor, writeStoredCockpitPrefs } from './lib/cockpitState.js';
 import { formatCompact, formatPercent, formatPrice, getPricePrecision } from './lib/formatters.js';
-import { buildFocusMap, buildReplayRange, pickReplayModeLabel, summarizeReplayMetrics } from './lib/replay.js';
+import {
+  buildFocusMap,
+  buildReplayRange,
+  compactReplayFocus,
+  formatReplayTimestamp,
+  pickReplayModeLabel,
+  summarizeReplayMetrics
+} from './lib/replay.js';
 
 const app = document.querySelector('#app');
 
@@ -333,22 +340,20 @@ function renderCoverage(data) {
 
 function renderReplayEvents(events) {
   replayMeta.textContent = state.replayEvent
-    ? `${events?.length || 0} windows · locked`
-    : `${events?.length || 0} windows · latest first`;
+    ? `${events?.length || 0} locked`
+    : `${events?.length || 0} latest`;
 
   replayList.innerHTML = (events || []).map((event) => {
     const metrics = summarizeReplayMetrics(event);
     return `
       <button class="replay-item ${state.replayEvent?.id === event.id ? 'active' : ''}" data-replay-id="${event.id}">
         <div class="replay-item-ledger">
-          <span class="replay-item-time">${formatTimestamp(event.time)}</span>
+          <span class="replay-item-time">${formatReplayTimestamp(event.time)}</span>
           <span class="replay-item-title">${event.title}</span>
-          <span class="replay-focus-pill">${event.focus_mode}</span>
+          <span class="replay-focus-pill">${compactReplayFocus(event.focus_mode)}</span>
         </div>
         <div class="replay-item-metrics">
-          <span>B ${metrics.basis}</span>
-          <span>OI ${metrics.oiChange}</span>
-          <span>F ${metrics.funding}</span>
+          <span class="replay-item-metric-line">B ${metrics.basis} · OI ${metrics.oiChange} · F ${metrics.funding}</span>
         </div>
         ${state.replayEvent?.id === event.id ? `<div class="replay-item-copy">${event.summary}</div>` : ''}
       </button>

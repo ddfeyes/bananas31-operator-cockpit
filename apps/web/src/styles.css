@@ -386,6 +386,9 @@ body::before {
 .rail-card .panel-meta {
   font-size: 8px;
   max-width: none;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-family: var(--mono);
 }
 
 .rail-body,
@@ -461,7 +464,7 @@ body::before {
 .replay-item {
   width: 100%;
   text-align: left;
-  padding: 4px 0 5px;
+  padding: 4px 0 4px;
   border: 0;
   border-bottom: 1px solid var(--line);
   background: transparent;
@@ -478,7 +481,7 @@ body::before {
   color: #ffffff;
   background: rgba(122, 213, 255, 0.04);
   border-left: 2px solid rgba(122, 213, 255, 0.72);
-  padding-left: 8px;
+  padding-left: 7px;
 }
 
 .replay-item:not(.active) {
@@ -496,20 +499,26 @@ body::before {
 .replay-item-ledger {
   font-family: var(--mono);
   font-size: 9px;
-  text-transform: uppercase;
   letter-spacing: 0.12em;
 }
 
 .replay-item-title {
   color: var(--text);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .replay-focus-pill {
-  color: var(--cyan);
+  color: rgba(122, 213, 255, 0.82);
   text-align: right;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 .replay-item-time {
@@ -518,15 +527,24 @@ body::before {
 }
 
 .replay-item-metrics {
-  margin-top: 2px;
+  grid-template-columns: 76px minmax(0, 1fr);
+  margin-top: 1px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 8px;
   letter-spacing: 0.08em;
   color: var(--muted);
 }
 
+.replay-item-metric-line {
+  grid-column: 2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .replay-item-copy {
-  margin-top: 3px;
+  margin-top: 2px;
+  padding-left: 84px;
   color: var(--text);
   font-size: 9px;
   line-height: 1.35;

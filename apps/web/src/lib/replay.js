@@ -40,6 +40,32 @@ export function pickReplayModeLabel(event, focusMode = 'all') {
   }
 }
 
+export function formatReplayTimestamp(timestamp) {
+  if (!timestamp) return '—';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(new Date(timestamp * 1000));
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.month} ${values.day} · ${values.hour}:${values.minute}`;
+}
+
+export function compactReplayFocus(mode = '') {
+  switch (mode) {
+    case 'basis':
+      return 'Carry';
+    case 'leverage':
+      return 'Lev';
+    case 'funding':
+      return 'Reset';
+    default:
+      return mode || 'Live';
+  }
+}
+
 export function summarizeReplayMetrics(event) {
   const metrics = event?.metrics || {};
   return {
@@ -47,4 +73,9 @@ export function summarizeReplayMetrics(event) {
     oiChange: metrics.oi_change_pct == null ? '—' : `${Number(metrics.oi_change_pct).toFixed(2)}%`,
     funding: metrics.funding_8h_pct == null ? '—' : `${Number(metrics.funding_8h_pct).toFixed(4)}%`
   };
+}
+
+export function summarizeReplayLine(event) {
+  const metrics = summarizeReplayMetrics(event);
+  return `B ${metrics.basis} · OI ${metrics.oiChange} · F ${metrics.funding}`;
 }
