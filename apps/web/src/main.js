@@ -61,6 +61,8 @@ app.innerHTML = `
     <section class="command-deck">
       <div class="toolbar-group" id="interval-group">
         <button data-interval="1m" data-optional-interval hidden disabled aria-hidden="true">1M</button>
+        <button data-interval="5m" data-optional-interval hidden disabled aria-hidden="true">5M</button>
+        <button data-interval="30m" data-optional-interval hidden disabled aria-hidden="true">30M</button>
         <button data-interval="1h">1H</button>
         <button data-interval="4h" class="active">4H</button>
         <button data-interval="1d">1D</button>
@@ -370,16 +372,21 @@ function toggleOiSeries(key) {
 }
 
 async function hydrateOptionalIntervals() {
-  const minuteSupported = await probeCockpitIntervalSupport('1m', getViewConfig('1m'));
-  if (minuteSupported) {
-    state.supportedIntervals.add('1m');
-  } else {
-    state.supportedIntervals.delete('1m');
-    if (state.interval === '1m') {
-      state.interval = DEFAULT_INTERVAL;
-      persistCockpitPrefs();
+  const optionalIntervals = ['1m', '5m', '30m'];
+  const results = await Promise.all(
+    optionalIntervals.map(async (interval) => [interval, await probeCockpitIntervalSupport(interval, getViewConfig(interval))])
+  );
+  results.forEach(([interval, supported]) => {
+    if (supported) {
+      state.supportedIntervals.add(interval);
+    } else {
+      state.supportedIntervals.delete(interval);
+      if (state.interval === interval) {
+        state.interval = DEFAULT_INTERVAL;
+        persistCockpitPrefs();
+      }
     }
-  }
+  });
   syncControlButtons();
 }
 

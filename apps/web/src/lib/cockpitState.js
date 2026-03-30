@@ -1,6 +1,6 @@
 const STORAGE_KEY = 'bananas31-operator-cockpit';
 
-const VALID_INTERVALS = new Set(['1m', '1h', '4h', '1d']);
+const VALID_INTERVALS = new Set(['1m', '5m', '30m', '1h', '4h', '1d']);
 const VALID_FOCUS_MODES = new Set(['all', 'basis', 'leverage', 'funding']);
 
 export function readStoredCockpitPrefs(storage = globalThis?.localStorage) {
@@ -77,10 +77,14 @@ export function matchHotkeyAction(eventLike) {
     case '1':
       return { type: 'interval', value: '1m' };
     case '2':
-      return { type: 'interval', value: '1h' };
+      return { type: 'interval', value: '5m' };
     case '3':
-      return { type: 'interval', value: '4h' };
+      return { type: 'interval', value: '30m' };
     case '4':
+      return { type: 'interval', value: '1h' };
+    case '5':
+      return { type: 'interval', value: '4h' };
+    case '6':
       return { type: 'interval', value: '1d' };
     case 'a':
       return { type: 'focus', value: 'all' };

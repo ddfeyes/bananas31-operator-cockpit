@@ -10,6 +10,20 @@ test('getViewConfig returns wider historical windows for desktop intervals', () 
     replayLimit: 10,
   });
 
+  assert.deepEqual(getViewConfig('5m'), {
+    lookbackMinutes: 60 * 24 * 30,
+    visibleBars: 336,
+    fundingIntervalSeconds: 300,
+    replayLimit: 10,
+  });
+
+  assert.deepEqual(getViewConfig('30m'), {
+    lookbackMinutes: 60 * 24 * 60,
+    visibleBars: 280,
+    fundingIntervalSeconds: 1800,
+    replayLimit: 9,
+  });
+
   assert.deepEqual(getViewConfig('1h'), {
     lookbackMinutes: 60 * 24 * 90,
     visibleBars: 192,
