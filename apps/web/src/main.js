@@ -106,25 +106,25 @@ app.innerHTML = `
           </article>
         </div>
       </div>
-
-      <aside class="command-rail">
-        <article class="panel rail-card">
-          <div class="panel-header">
-            <div>
-              <h2 class="panel-title">Replay Tape</h2>
-            </div>
-            <span class="panel-meta" id="replay-meta">J/K step · Esc live</span>
-          </div>
-          <div class="replay-list" id="replay-list"></div>
-        </article>
-      </aside>
     </section>
 
     <section class="support-grid">
+      <article class="support-card support-cluster support-replay">
+        <div class="support-head">
+          <p class="support-kicker">Replay</p>
+          <span class="support-meta" id="replay-meta">6 windows</span>
+        </div>
+        <div class="replay-list" id="replay-list"></div>
+      </article>
+
       <article class="support-card support-cluster">
         <div class="support-head">
           <p class="support-kicker">Coverage</p>
-          <span class="support-meta">Bars · freshness</span>
+          <div class="support-columns coverage-columns">
+            <span>Source</span>
+            <span>Bars</span>
+            <span>Fresh</span>
+          </div>
         </div>
         <div class="coverage-list" id="coverage-list"></div>
       </article>
@@ -132,7 +132,11 @@ app.innerHTML = `
       <article class="support-card support-cluster">
         <div class="support-head">
           <p class="support-kicker">Reading</p>
-          <span class="support-meta">Current posture</span>
+          <div class="support-columns thesis-columns">
+            <span>Signal</span>
+            <span>State</span>
+            <span>Value</span>
+          </div>
         </div>
         <ul class="thesis-list" id="thesis-list"></ul>
       </article>
@@ -224,6 +228,15 @@ function formatTimeCompact(timestamp) {
   });
 }
 
+function formatCoverageFreshness(timestamp, referenceTimestamp) {
+  if (!timestamp) return '—';
+  if (!referenceTimestamp) return formatLedgerTimestamp(timestamp);
+  const current = new Date(timestamp * 1000);
+  const reference = new Date(referenceTimestamp * 1000);
+  const sameDay = current.toDateString() === reference.toDateString();
+  return sameDay ? formatTimeCompact(timestamp) : formatReplayTimestamp(timestamp);
+}
+
 function barsLabel(count) {
   return `${count} ${state.interval.toUpperCase()} bars`;
 }
@@ -246,23 +259,23 @@ function deriveSessionThesis(snapshot) {
   const items = [];
 
   if (basis < 0) {
-    items.push(['Carry', `Defensive · ${formatPercent(basis, 2)}`]);
+    items.push({ label: 'Carry', state: 'Defensive', value: formatPercent(basis, 2) });
   } else {
-    items.push(['Carry', `Engaged · ${formatPercent(basis, 2)}`]);
+    items.push({ label: 'Carry', state: 'Engaged', value: formatPercent(basis, 2) });
   }
 
   if (funding > 0.05) {
-    items.push(['Funding', `Hot · ${formatPercent(funding, 4)}`]);
+    items.push({ label: 'Funding', state: 'Hot', value: formatPercent(funding, 4) });
   } else if (funding < 0) {
-    items.push(['Funding', 'Negative · squeeze risk']);
+    items.push({ label: 'Funding', state: 'Negative', value: 'Squeeze' });
   } else {
-    items.push(['Funding', `Calm · ${formatPercent(funding, 4)}`]);
+    items.push({ label: 'Funding', state: 'Calm', value: formatPercent(funding, 4) });
   }
 
   if (oi >= 7_500_000_000) {
-    items.push(['Leverage', `Heavy · ${formatCompact(oi)}`]);
+    items.push({ label: 'Leverage', state: 'Heavy', value: formatCompact(oi) });
   } else {
-    items.push(['Leverage', `Moderate · ${formatCompact(oi)}`]);
+    items.push({ label: 'Leverage', state: 'Moderate', value: formatCompact(oi) });
   }
 
   return items;
@@ -299,9 +312,10 @@ function renderSummary(snapshot) {
   sessionRange.textContent = `${formatPrice(snapshot.summary.low_24h)} → ${formatPrice(snapshot.summary.high_24h)}`;
 
   thesisList.innerHTML = deriveSessionThesis(snapshot)
-    .map(([label, value]) => `
+    .map(({ label, state: thesisState, value }) => `
       <li>
         <span class="thesis-key">${label}</span>
+        <span class="thesis-state">${thesisState}</span>
         <span class="thesis-value">${value}</span>
       </li>
     `)
@@ -309,6 +323,7 @@ function renderSummary(snapshot) {
 }
 
 function renderCoverage(data) {
+  const referenceTimestamp = lastPointTime(data.spot.bars);
   const rows = [
     ['BN Spot', data.spot.bars, lastPointTime(data.spot.bars)],
     ['BN Perp', data.perp.bars, lastPointTime(data.perp.bars)],
@@ -321,11 +336,12 @@ function renderCoverage(data) {
   coverageList.innerHTML = rows.map(([label, series, timestamp]) => {
     const count = Array.isArray(series) ? series.length : 0;
     const status = coverageStatus(count);
+    const countLabel = status.tone === 'good' ? `${count}` : `${count} ${status.label.toLowerCase()}`;
     return `
         <div class="coverage-item">
           <span class="coverage-item-source">${label}</span>
-          <span class="coverage-item-count ${status.tone}">${count}</span>
-          <span class="coverage-item-time">${formatLedgerTimestamp(timestamp)}</span>
+          <span class="coverage-item-count ${status.tone}">${countLabel}</span>
+          <span class="coverage-item-time">${formatCoverageFreshness(timestamp, referenceTimestamp)}</span>
         </div>
     `;
   }).join('');
@@ -340,8 +356,8 @@ function renderCoverage(data) {
 
 function renderReplayEvents(events) {
   replayMeta.textContent = state.replayEvent
-    ? `${events?.length || 0} locked`
-    : `${events?.length || 0} latest`;
+    ? `${events?.length || 0} windows · lock`
+    : `${events?.length || 0} windows`;
 
   replayList.innerHTML = (events || []).map((event) => {
     const metricLine = summarizeReplayLine(event);
@@ -353,7 +369,6 @@ function renderReplayEvents(events) {
           <span class="replay-focus-pill">${compactReplayFocus(event.focus_mode)}</span>
         </div>
         <div class="replay-item-metrics">${metricLine}</div>
-        ${state.replayEvent?.id === event.id ? `<div class="replay-item-copy">${event.summary}</div>` : ''}
       </button>
     `;
   }).join('');
@@ -624,7 +639,7 @@ function selectInterval(interval) {
   loadCockpit().catch((error) => {
     console.error(error);
     replayList.innerHTML = `<span class="loading">${error.message}</span>`;
-    dataHealth.textContent = 'Fault';
+    syncState.textContent = 'Fault';
   });
 }
 
@@ -677,5 +692,5 @@ syncControlButtons();
 loadCockpit().catch((error) => {
   console.error(error);
   replayList.innerHTML = `<span class="loading">${error.message}</span>`;
-  dataHealth.textContent = 'Fault';
+  syncState.textContent = 'Fault';
 });
