@@ -1,6 +1,15 @@
 import './styles.css';
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts';
-import { fetchBasis, fetchFunding, fetchOhlcv, fetchOi, fetchReplayEvents, fetchSnapshot } from './lib/api.js';
+import {
+  fetchBasis,
+  fetchDex,
+  fetchFunding,
+  fetchOhlcv,
+  fetchOi,
+  fetchReplayEvents,
+  fetchSnapshot,
+  probeCockpitIntervalSupport
+} from './lib/api.js';
 import { computeVisibleRange, createActiveChartSync, shouldIgnoreRangeSyncError } from './lib/chartSync.js';
 import { matchHotkeyAction, readStoredCockpitPrefs, resolveReplayNeighbor, writeStoredCockpitPrefs } from './lib/cockpitState.js';
 import { formatCompact, formatPercent, formatPrice, getPricePrecision } from './lib/formatters.js';
@@ -45,6 +54,7 @@ app.innerHTML = `
 
     <section class="command-deck">
       <div class="toolbar-group" id="interval-group">
+        <button data-interval="1m" data-optional-interval hidden disabled aria-hidden="true">1M</button>
         <button data-interval="1h">1H</button>
         <button data-interval="4h" class="active">4H</button>
         <button data-interval="1d">1D</button>
@@ -161,6 +171,8 @@ const priceMeta = document.querySelector('#price-meta');
 const basisMeta = document.querySelector('#basis-meta');
 const oiMeta = document.querySelector('#oi-meta');
 const fundingMeta = document.querySelector('#funding-meta');
+const DEFAULT_INTERVAL = '4h';
+const BASE_INTERVALS = new Set(['1h', '4h', '1d']);
 
 const charts = {};
 const persistedPrefs = readStoredCockpitPrefs();
@@ -174,6 +186,7 @@ const panelElements = {
 const state = {
   interval: persistedPrefs.interval,
   focusMode: persistedPrefs.focusMode,
+  supportedIntervals: new Set(BASE_INTERVALS),
   replayEvent: null,
   replayEvents: [],
   payload: null,
@@ -191,11 +204,35 @@ function persistCockpitPrefs() {
 
 function syncControlButtons() {
   intervalButtons.forEach((button) => {
-    button.classList.toggle('active', button.dataset.interval === state.interval);
+    const supported = state.supportedIntervals.has(button.dataset.interval);
+    const optional = button.hasAttribute('data-optional-interval');
+    button.hidden = optional && !supported;
+    button.disabled = !supported;
+    button.classList.toggle('active', supported && button.dataset.interval === state.interval);
   });
   focusButtons.forEach((button) => {
     button.classList.toggle('active', button.dataset.focus === state.focusMode);
   });
+}
+
+function syncIntervalLoadingState(loading) {
+  intervalButtons.forEach((button) => {
+    button.disabled = loading || !state.supportedIntervals.has(button.dataset.interval);
+  });
+}
+
+async function hydrateOptionalIntervals() {
+  const minuteSupported = await probeCockpitIntervalSupport('1m', getViewConfig('1m'));
+  if (minuteSupported) {
+    state.supportedIntervals.add('1m');
+  } else {
+    state.supportedIntervals.delete('1m');
+    if (state.interval === '1m') {
+      state.interval = DEFAULT_INTERVAL;
+      persistCockpitPrefs();
+    }
+  }
+  syncControlButtons();
 }
 
 function formatTimestamp(timestamp) {
@@ -341,6 +378,7 @@ function renderCoverage(data) {
     ['BN Spot', data.spot.bars, lastPointTime(data.spot.bars)],
     ['BN Perp', data.perp.bars, lastPointTime(data.perp.bars)],
     ['Bybit', data.bybit.bars, lastPointTime(data.bybit.bars)],
+    ['DEX', data.dex.bars, lastPointTime(data.dex.bars)],
     ['Basis', data.basis.aggregated, lastPointTime(data.basis.aggregated)],
     ['Perp OI', data.oi.aggregated, lastPointTime(data.oi.aggregated)],
     ['Funding', data.funding.per_source?.['binance-perp'] || [], lastPointTime(data.funding.per_source?.['binance-perp'] || [])]
@@ -461,6 +499,12 @@ function createCharts() {
   });
   charts.price.bybitPerp = charts.price.chart.addSeries(LineSeries, {
     color: '#9a7cff',
+    lineWidth: 1,
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
+  charts.price.dex = charts.price.chart.addSeries(LineSeries, {
+    color: '#5ad1ff',
     lineWidth: 1,
     lastValueVisible: false,
     priceLineVisible: false,
@@ -656,7 +700,7 @@ function updatePanelMeta(data) {
     .map((value) => formatPercent(value * 100, 4));
   priceMeta.textContent = state.replayEvent
     ? `${data.spot.bars.length} ${state.interval.toUpperCase()} · replay lock`
-    : `${data.spot.bars.length} ${state.interval.toUpperCase()} · spot + perp`;
+    : `${data.spot.bars.length} ${state.interval.toUpperCase()} · spot + perp + dex`;
   basisMeta.textContent = `${data.basis.aggregated.length} agg · ${formatPercent(latestBasis?.value, 2)}`;
   oiMeta.textContent = `${formatCompact(latestOiAgg?.value)} agg · BN ${formatCompact(latestOiBinance?.value)} · BY ${formatCompact(latestOiBybit?.value)}`;
   const fundingCount = Math.max(
@@ -675,16 +719,15 @@ async function loadCockpit() {
   const minutes = view.lookbackMinutes;
   syncState.textContent = `Loading · ${interval.toUpperCase()}`;
   replayMeta.textContent = 'Loading';
-  intervalButtons.forEach((button) => {
-    button.disabled = true;
-  });
+  syncIntervalLoadingState(true);
 
   try {
-    const [snapshot, spot, perp, bybit, basis, oi, funding, replay] = await Promise.all([
+    const [snapshot, spot, perp, bybit, dex, basis, oi, funding, replay] = await Promise.all([
       fetchSnapshot(),
       fetchOhlcv('binance-spot', minutes, interval),
       fetchOhlcv('binance-perp', minutes, interval),
       fetchOhlcv('bybit-perp', minutes, interval),
+      fetchDex(minutes, interval),
       fetchBasis(minutes * 60, interval),
       fetchOi(minutes, interval),
       fetchFunding(minutes * 60, view.fundingIntervalSeconds),
@@ -695,7 +738,7 @@ async function loadCockpit() {
       return;
     }
 
-    const payload = { snapshot, spot, perp, bybit, basis, oi, funding, replay };
+    const payload = { snapshot, spot, perp, bybit, dex, basis, oi, funding, replay };
     state.payload = payload;
     state.replayEvents = replay.events || [];
 
@@ -712,7 +755,8 @@ async function loadCockpit() {
     const pricePrecision = getPricePrecision([
       ...(spot.bars || []),
       ...(perp.bars || []).map((bar) => ({ value: bar.close })),
-      ...(bybit.bars || []).map((bar) => ({ value: bar.close }))
+      ...(bybit.bars || []).map((bar) => ({ value: bar.close })),
+      ...(dex.bars || []).map((bar) => ({ value: bar.value }))
     ]);
     const precisePriceFormat = {
       type: 'price',
@@ -722,6 +766,7 @@ async function loadCockpit() {
     charts.price.candles.applyOptions({ priceFormat: precisePriceFormat });
     charts.price.binancePerp.applyOptions({ priceFormat: precisePriceFormat });
     charts.price.bybitPerp.applyOptions({ priceFormat: precisePriceFormat });
+    charts.price.dex.applyOptions({ priceFormat: precisePriceFormat });
 
     const spotBars = spot.bars || [];
     charts.price.candles.setData(spotBars.map((bar) => ({
@@ -738,6 +783,7 @@ async function loadCockpit() {
     })));
     charts.price.binancePerp.setData((perp.bars || []).map((bar) => ({ time: bar.time, value: bar.close })));
     charts.price.bybitPerp.setData((bybit.bars || []).map((bar) => ({ time: bar.time, value: bar.close })));
+    charts.price.dex.setData((dex.bars || []).map((bar) => ({ time: bar.time, value: bar.value })));
 
     charts.basis.binance.setData((basis.per_exchange?.binance || []).map((point) => ({ time: point.time, value: point.value })));
     charts.basis.bybit.setData((basis.per_exchange?.bybit || []).map((point) => ({ time: point.time, value: point.value })));
@@ -754,15 +800,13 @@ async function loadCockpit() {
     setFocusMode(state.focusMode, { preserveReplay: true });
   } finally {
     if (requestId === state.loadRequestId) {
-      intervalButtons.forEach((button) => {
-        button.disabled = false;
-      });
+      syncIntervalLoadingState(false);
     }
   }
 }
 
 function selectInterval(interval) {
-  if (!interval || interval === state.interval) {
+  if (!interval || interval === state.interval || !state.supportedIntervals.has(interval)) {
     return;
   }
 
@@ -827,8 +871,10 @@ window.addEventListener('keydown', (event) => {
 
 createCharts();
 syncControlButtons();
-loadCockpit().catch((error) => {
+hydrateOptionalIntervals()
+  .then(() => loadCockpit())
+  .catch((error) => {
   console.error(error);
   replayList.innerHTML = `<span class="loading">${error.message}</span>`;
   syncState.textContent = 'Fault';
-});
+  });

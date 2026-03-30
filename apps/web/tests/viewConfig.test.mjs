@@ -3,6 +3,13 @@ import assert from 'node:assert/strict';
 import { getViewConfig } from '../src/lib/viewConfig.js';
 
 test('getViewConfig returns wider historical windows for desktop intervals', () => {
+  assert.deepEqual(getViewConfig('1m'), {
+    lookbackMinutes: 60 * 24 * 14,
+    visibleBars: 360,
+    fundingIntervalSeconds: 60,
+    replayLimit: 10,
+  });
+
   assert.deepEqual(getViewConfig('1h'), {
     lookbackMinutes: 60 * 24 * 90,
     visibleBars: 192,

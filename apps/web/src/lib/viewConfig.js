@@ -1,4 +1,10 @@
 const VIEW_CONFIG = {
+  '1m': {
+    lookbackMinutes: 60 * 24 * 14,
+    visibleBars: 360,
+    fundingIntervalSeconds: 60,
+    replayLimit: 10,
+  },
   '1h': {
     lookbackMinutes: 60 * 24 * 90,
     visibleBars: 192,

@@ -176,6 +176,22 @@ def fetch_ohlcv_series(database: Database, exchange_id: str, minutes: int, inter
     }
 
 
+def fetch_dex_series(database: Database, minutes: int, interval: str) -> dict[str, Any]:
+    start_ts = time.time() - minutes * 60
+    with closing(database.connect()) as connection:
+        rows = connection.execute(
+            "SELECT timestamp, price FROM dex_price WHERE timestamp >= ? ORDER BY timestamp ASC",
+            (start_ts,),
+        ).fetchall()
+    bars = resample_last_value(rows, interval, "price")
+    return {
+        "source": "bsc-pancakeswap",
+        "interval": interval,
+        "count": len(bars),
+        "bars": bars,
+    }
+
+
 def fetch_basis_series(database: Database, window_secs: int, interval: str) -> dict[str, Any]:
     start_ts = time.time() - window_secs
     with closing(database.connect()) as connection:

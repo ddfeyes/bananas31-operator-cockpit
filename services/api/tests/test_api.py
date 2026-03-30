@@ -107,6 +107,10 @@ def test_history_endpoints_return_expected_shapes(tmp_path: Path) -> None:
     assert ohlcv["count"] == 2
     assert len(ohlcv["bars"]) == 2
 
+    dex = client.get("/api/history/dex", params={"minutes": 10_000_000, "interval": "1m"}).json()
+    assert dex["count"] == 1
+    assert dex["bars"][-1]["value"] == 1.19
+
     basis = client.get("/api/history/basis", params={"window_secs": 10_000_000, "interval": "1h"}).json()
     assert len(basis["aggregated"]) == 2
     assert len(basis["per_exchange"]["binance"]) == 2

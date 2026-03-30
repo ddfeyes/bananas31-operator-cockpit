@@ -24,6 +24,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir fastapi uvicorn
 
 COPY services/api/app ./app
+COPY services/collectors ./collectors
 COPY --from=web-build /repo/apps/web/dist /app/web-dist
 
 EXPOSE 8010

@@ -10,6 +10,9 @@
     "build:web": "pnpm --filter @bananas31/web build",
     "test:api": "cd services/api && UV_CACHE_DIR=../../.cache/uv uv run pytest",
     "seed:sample-db": "cd services/api && UV_CACHE_DIR=../../.cache/uv uv run python scripts/seed_sample_db.py",
-    "serve:api": "cd services/api && UV_CACHE_DIR=../../.cache/uv uv run uvicorn app.main:app --host 127.0.0.1 --port 8010"
+    "serve:api": "cd services/api && UV_CACHE_DIR=../../.cache/uv uv run uvicorn app.main:app --host 127.0.0.1 --port 8010",
+    "collect:minute": "python3 services/collectors/minute_poller.py --db services/api/data/aggdash.db --interval-seconds 60",
+    "collect:minute:once": "python3 services/collectors/minute_poller.py --db services/api/data/aggdash.db --interval-seconds 60 --once",
+    "backfill:ohlcv:1m": "python3 services/collectors/backfill_ohlcv.py --db services/api/data/aggdash.db --interval 1m --days 14"
   }
 }

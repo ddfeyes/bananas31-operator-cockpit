@@ -38,6 +38,12 @@ test('writeStoredCockpitPrefs persists only valid values', () => {
     focusMode: 'basis'
   });
 
+  writeStoredCockpitPrefs(storage, { interval: '1m', focusMode: 'all' });
+  assert.deepEqual(readStoredCockpitPrefs(storage), {
+    interval: '1m',
+    focusMode: 'all'
+  });
+
   writeStoredCockpitPrefs(storage, { interval: '15m', focusMode: 'weird' });
   assert.deepEqual(readStoredCockpitPrefs(storage), {
     interval: '4h',
@@ -56,7 +62,11 @@ test('resolveReplayNeighbor walks replay events predictably', () => {
 });
 
 test('matchHotkeyAction maps the compact operator controls', () => {
-  assert.deepEqual(matchHotkeyAction({ key: '2' }), {
+  assert.deepEqual(matchHotkeyAction({ key: '1' }), {
+    type: 'interval',
+    value: '1m'
+  });
+  assert.deepEqual(matchHotkeyAction({ key: '3' }), {
     type: 'interval',
     value: '4h'
   });

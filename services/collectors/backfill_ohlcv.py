@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 INTERVAL_TO_SECONDS = {
+    "1m": 60,
     "1h": 3600,
     "4h": 14400,
     "1d": 86400,
@@ -63,7 +64,7 @@ def fetch_binance_page(source: Source, interval: str, start_ms: int, end_ms: int
 
 
 def fetch_bybit_page(interval: str, start_ms: int, end_ms: int) -> list[tuple[float, float, float, float, float, float]]:
-    interval_label = {"1h": "60", "4h": "240", "1d": "D"}[interval]
+    interval_label = {"1m": "1", "1h": "60", "4h": "240", "1d": "D"}[interval]
     payload = fetch_json(
         "https://api.bybit.com/v5/market/kline",
         {

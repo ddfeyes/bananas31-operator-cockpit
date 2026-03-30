@@ -11,6 +11,7 @@ from .config import WEB_DIST
 from .db import (
     Database,
     fetch_basis_series,
+    fetch_dex_series,
     fetch_funding_series,
     fetch_latest_snapshot,
     fetch_ohlcv_series,
@@ -69,6 +70,13 @@ def create_app(database: Database | None = None) -> FastAPI:
     ) -> dict:
         return fetch_ohlcv_series(db, exchange_id, minutes, interval)
 
+    @app.get("/api/history/dex")
+    def history_dex(
+        minutes: int = Query(43200, ge=60),
+        interval: str = Query("4h"),
+    ) -> dict:
+        return fetch_dex_series(db, minutes, interval)
+
     @app.get("/api/history/basis")
     def history_basis(
         window_secs: int = Query(86400 * 30, ge=3600),
@@ -86,7 +94,7 @@ def create_app(database: Database | None = None) -> FastAPI:
     @app.get("/api/history/funding")
     def history_funding(
         window_secs: int = Query(86400 * 30, ge=3600),
-        interval_secs: int = Query(14400, ge=300),
+        interval_secs: int = Query(14400, ge=60),
     ) -> dict:
         return fetch_funding_series(db, window_secs, interval_secs)
 

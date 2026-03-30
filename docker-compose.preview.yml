@@ -19,6 +19,16 @@ services:
       retries: 3
       start_period: 20s
 
+  bananas31-minute-poller:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bananas31-minute-poller-preview
+    restart: unless-stopped
+    command: ["python", "/app/collectors/minute_poller.py", "--db", "/app/data/aggdash.db", "--interval-seconds", "60"]
+    volumes:
+      - aggdash-data:/app/data
+
 volumes:
   aggdash-data:
     external: true
