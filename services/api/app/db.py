@@ -7,7 +7,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from typing import Any
 
-from .config import DEFAULT_DB_PATH
+from .config import DB_PATH
 
 
 INTERVAL_TO_SECONDS = {
@@ -23,7 +23,7 @@ INTERVAL_TO_SECONDS = {
 
 @dataclass
 class Database:
-    path: str = DEFAULT_DB_PATH
+    path: str = str(DB_PATH)
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, check_same_thread=False)
