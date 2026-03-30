@@ -1,0 +1,242 @@
+from __future__ import annotations
+
+import sqlite3
+import time
+from collections import defaultdict
+from contextlib import closing
+from dataclasses import dataclass
+from typing import Any
+
+from .config import DEFAULT_DB_PATH
+
+
+INTERVAL_TO_SECONDS = {
+    "1m": 60,
+    "5m": 300,
+    "15m": 900,
+    "1h": 3600,
+    "4h": 14400,
+    "1d": 86400,
+    "1w": 604800,
+}
+
+
+@dataclass
+class Database:
+    path: str = DEFAULT_DB_PATH
+
+    def connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path, check_same_thread=False)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+
+def bucket_timestamp(timestamp: float, interval: str) -> int:
+    interval_secs = INTERVAL_TO_SECONDS.get(interval, 14400)
+    return int(timestamp // interval_secs * interval_secs)
+
+
+def resample_ohlcv(rows: list[sqlite3.Row], interval: str) -> list[dict[str, Any]]:
+    buckets: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        bucket = bucket_timestamp(row["timestamp"], interval)
+        current = buckets.get(bucket)
+        if current is None:
+            buckets[bucket] = {
+                "time": bucket,
+                "open": row["open"],
+                "high": row["high"],
+                "low": row["low"],
+                "close": row["close"],
+                "volume": row["volume"] or 0,
+            }
+            continue
+        current["high"] = max(current["high"], row["high"])
+        current["low"] = min(current["low"], row["low"])
+        current["close"] = row["close"]
+        current["volume"] += row["volume"] or 0
+    return [buckets[key] for key in sorted(buckets)]
+
+
+def resample_last_value(rows: list[sqlite3.Row], interval: str, value_key: str) -> list[dict[str, Any]]:
+    buckets: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        bucket = bucket_timestamp(row["timestamp"], interval)
+        buckets[bucket] = {
+            "time": bucket,
+            "value": row[value_key],
+        }
+    return [buckets[key] for key in sorted(buckets)]
+
+
+def resample_funding(rows: list[sqlite3.Row], interval_secs: int) -> list[dict[str, Any]]:
+    buckets: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        bucket = int(row["timestamp"] // interval_secs * interval_secs)
+        buckets[bucket] = {
+            "time": bucket,
+            "rate_8h": row["rate_8h"],
+            "rate_1h": row["rate_1h"],
+        }
+    return [buckets[key] for key in sorted(buckets)]
+
+
+def fetch_latest_snapshot(database: Database) -> dict[str, Any]:
+    with closing(database.connect()) as connection:
+        now = time.time()
+        prices = {}
+        for source in ("binance-spot", "binance-perp", "bybit-perp"):
+            row = connection.execute(
+                "SELECT close FROM price_feed WHERE exchange_id=? ORDER BY timestamp DESC LIMIT 1",
+                (source,),
+            ).fetchone()
+            prices[source] = row["close"] if row else None
+
+        dex_row = connection.execute(
+            "SELECT price FROM dex_price ORDER BY timestamp DESC LIMIT 1"
+        ).fetchone()
+        prices["dex"] = dex_row["price"] if dex_row else None
+
+        high_low = connection.execute(
+            "SELECT MAX(high) AS high_24h, MIN(low) AS low_24h FROM price_feed WHERE exchange_id='binance-spot' AND timestamp >= ?",
+            (now - 86400,),
+        ).fetchone()
+        funding_rows = connection.execute(
+            "SELECT exchange_id, rate_8h FROM funding_rates WHERE timestamp >= ? ORDER BY timestamp DESC",
+            (now - 86400 * 30,),
+        ).fetchall()
+        oi_rows = connection.execute(
+            "SELECT exchange_id, open_interest FROM oi ORDER BY timestamp DESC LIMIT 2"
+        ).fetchall()
+
+        basis = fetch_basis_series(database, 86400 * 2, "4h")
+        agg_basis = basis["aggregated"][-1]["value"] if basis["aggregated"] else None
+        avg_funding = None
+        if funding_rows:
+            values = [row["rate_8h"] * 100 for row in funding_rows[:2]]
+            avg_funding = sum(values) / len(values)
+
+        return {
+            "prices": prices,
+            "summary": {
+                "basis_agg_pct": agg_basis,
+                "funding_avg_8h_pct": avg_funding,
+                "oi_total": sum(row["open_interest"] for row in oi_rows if row["open_interest"] is not None),
+                "high_24h": high_low["high_24h"] if high_low else None,
+                "low_24h": high_low["low_24h"] if high_low else None,
+            },
+        }
+
+
+def fetch_ohlcv_series(database: Database, exchange_id: str, minutes: int, interval: str) -> dict[str, Any]:
+    start_ts = time.time() - minutes * 60
+    with closing(database.connect()) as connection:
+        rows = connection.execute(
+            "SELECT timestamp, open, high, low, close, volume FROM price_feed WHERE exchange_id=? AND timestamp >= ? ORDER BY timestamp ASC",
+            (exchange_id, start_ts),
+        ).fetchall()
+    bars = resample_ohlcv(rows, interval)
+    return {
+        "exchange_id": exchange_id,
+        "interval": interval,
+        "count": len(bars),
+        "bars": bars,
+    }
+
+
+def fetch_basis_series(database: Database, window_secs: int, interval: str) -> dict[str, Any]:
+    start_ts = time.time() - window_secs
+    with closing(database.connect()) as connection:
+        sources = {
+            "spot": connection.execute(
+                "SELECT timestamp, close FROM price_feed WHERE exchange_id='binance-spot' AND timestamp >= ? ORDER BY timestamp ASC",
+                (start_ts,),
+            ).fetchall(),
+            "binance": connection.execute(
+                "SELECT timestamp, close FROM price_feed WHERE exchange_id='binance-perp' AND timestamp >= ? ORDER BY timestamp ASC",
+                (start_ts,),
+            ).fetchall(),
+            "bybit": connection.execute(
+                "SELECT timestamp, close FROM price_feed WHERE exchange_id='bybit-perp' AND timestamp >= ? ORDER BY timestamp ASC",
+                (start_ts,),
+            ).fetchall(),
+        }
+
+    spot = {bucket_timestamp(row["timestamp"], interval): row["close"] for row in sources["spot"]}
+    per_exchange = {}
+    aggregated_map: dict[int, list[float]] = defaultdict(list)
+
+    for name in ("binance", "bybit"):
+        series = []
+        for row in sources[name]:
+            bucket = bucket_timestamp(row["timestamp"], interval)
+            spot_price = spot.get(bucket)
+            perp_price = row["close"]
+            if spot_price in (None, 0) or perp_price is None:
+                continue
+            value = ((perp_price / spot_price) - 1) * 100
+            point = {"time": bucket, "value": value}
+            if not series or series[-1]["time"] != bucket:
+                series.append(point)
+                aggregated_map[bucket].append(value)
+        per_exchange[name] = series
+
+    aggregated = [{"time": key, "value": sum(values) / len(values)} for key, values in sorted(aggregated_map.items())]
+    return {
+        "window_secs": window_secs,
+        "interval_secs": INTERVAL_TO_SECONDS.get(interval, 14400),
+        "per_exchange": per_exchange,
+        "aggregated": aggregated,
+    }
+
+
+def fetch_oi_series(database: Database, minutes: int, interval: str) -> dict[str, Any]:
+    start_ts = time.time() - minutes * 60
+    with closing(database.connect()) as connection:
+        rows = connection.execute(
+            "SELECT exchange_id, timestamp, open_interest FROM oi WHERE timestamp >= ? ORDER BY timestamp ASC",
+            (start_ts,),
+        ).fetchall()
+
+    grouped: dict[str, list[sqlite3.Row]] = defaultdict(list)
+    for row in rows:
+        grouped[row["exchange_id"]].append(row)
+
+    per_source = {
+        exchange_id: resample_last_value(source_rows, interval, "open_interest")
+        for exchange_id, source_rows in grouped.items()
+    }
+
+    aggregated_map: dict[int, float] = defaultdict(float)
+    for series in per_source.values():
+        for point in series:
+            aggregated_map[point["time"]] += point["value"]
+
+    aggregated = [{"time": key, "value": value} for key, value in sorted(aggregated_map.items())]
+    return {
+        "per_source": per_source,
+        "aggregated": aggregated,
+    }
+
+
+def fetch_funding_series(database: Database, window_secs: int, interval_secs: int) -> dict[str, Any]:
+    start_ts = time.time() - window_secs
+    with closing(database.connect()) as connection:
+        rows = connection.execute(
+            "SELECT exchange_id, timestamp, rate_8h, rate_1h FROM funding_rates WHERE timestamp >= ? ORDER BY timestamp ASC",
+            (start_ts,),
+        ).fetchall()
+
+    grouped: dict[str, list[sqlite3.Row]] = defaultdict(list)
+    for row in rows:
+        grouped[row["exchange_id"]].append(row)
+
+    return {
+        "window_secs": window_secs,
+        "interval_secs": interval_secs,
+        "per_source": {
+            exchange_id: resample_funding(source_rows, interval_secs)
+            for exchange_id, source_rows in grouped.items()
+        },
+    }
+

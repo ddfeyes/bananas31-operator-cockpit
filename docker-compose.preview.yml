@@ -1,0 +1,25 @@
+services:
+  bananas31-operator-cockpit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bananas31-operator-cockpit-preview
+    restart: unless-stopped
+    ports:
+      - "${COCKPIT_PREVIEW_PORT:-8785}:8010"
+    environment:
+      - BANANAS31_DB_PATH=/app/data/aggdash.db
+      - BANANAS31_WEB_DIST=/app/web-dist
+    volumes:
+      - aggdash-data:/app/data:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  aggdash-data:
+    external: true
+    name: bananas31-dashboard-cockpit-preview_aggdash-data

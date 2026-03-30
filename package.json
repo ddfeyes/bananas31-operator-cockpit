@@ -5,7 +5,11 @@
   "description": "Clean-room rebuild of the BANANAS31 operator cockpit.",
   "packageManager": "pnpm@10.8.1",
   "scripts": {
-    "check": "node scripts/check-bootstrap.mjs"
+    "check": "node scripts/check-bootstrap.mjs",
+    "test:web": "node --test apps/web/tests/*.test.mjs",
+    "build:web": "pnpm --filter @bananas31/web build",
+    "test:api": "cd services/api && UV_CACHE_DIR=../../.cache/uv uv run pytest",
+    "seed:demo-db": "cd services/api && UV_CACHE_DIR=../../.cache/uv uv run python scripts/seed_demo_db.py",
+    "serve:api": "cd services/api && UV_CACHE_DIR=../../.cache/uv uv run uvicorn app.main:app --host 127.0.0.1 --port 8010"
   }
 }
-
