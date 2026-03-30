@@ -23,6 +23,11 @@ export function computeVisibleRange(points, interval = '4h', barsToShow = 180) {
   };
 }
 
+export function shouldIgnoreRangeSyncError(error) {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return message.includes('Value is null');
+}
+
 export function createActiveChartSync(entries) {
   const normalized = (entries || []).filter(Boolean);
   let activeChart = normalized[0]?.chart ?? null;
@@ -48,7 +53,9 @@ export function createActiveChartSync(entries) {
         try {
           target.chart.timeScale().setVisibleRange(range);
         } catch (error) {
-          console.warn(`range sync skipped for ${target.element?.id ?? 'chart'}`, error);
+          if (!shouldIgnoreRangeSyncError(error)) {
+            console.warn(`range sync skipped for ${target.element?.id ?? 'chart'}`, error);
+          }
         }
       });
       syncing = false;

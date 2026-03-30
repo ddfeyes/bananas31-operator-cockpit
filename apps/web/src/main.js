@@ -1,7 +1,7 @@
 import './styles.css';
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts';
 import { fetchBasis, fetchFunding, fetchOhlcv, fetchOi, fetchReplayEvents, fetchSnapshot } from './lib/api.js';
-import { computeVisibleRange, createActiveChartSync, INTERVAL_TO_SECONDS } from './lib/chartSync.js';
+import { computeVisibleRange, createActiveChartSync, INTERVAL_TO_SECONDS, shouldIgnoreRangeSyncError } from './lib/chartSync.js';
 import { matchHotkeyAction, readStoredCockpitPrefs, resolveReplayNeighbor, writeStoredCockpitPrefs } from './lib/cockpitState.js';
 import { formatCompact, formatPercent, formatPrice, getPricePrecision } from './lib/formatters.js';
 import {
@@ -441,7 +441,9 @@ function setVisibleRange(range) {
         try {
           chart.timeScale().setVisibleRange(range);
         } catch (error) {
-          console.warn('visible range skipped', error);
+          if (!shouldIgnoreRangeSyncError(error)) {
+            console.warn('visible range skipped', error);
+          }
         }
       });
     });

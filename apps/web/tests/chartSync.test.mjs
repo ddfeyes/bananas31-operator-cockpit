@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeVisibleRange, createActiveChartSync } from '../src/lib/chartSync.js';
+import { computeVisibleRange, createActiveChartSync, shouldIgnoreRangeSyncError } from '../src/lib/chartSync.js';
 
 test('computeVisibleRange limits the viewport to the most recent bars', () => {
   const bars = Array.from({ length: 240 }, (_, index) => ({ time: 1_700_000_000 + index * 14400 }));
@@ -60,3 +60,7 @@ test('createActiveChartSync syncs only from the active chart', () => {
   assert.deepEqual(funding.chart.received, [{ from: 11, to: 22 }]);
 });
 
+test('shouldIgnoreRangeSyncError suppresses benign lightweight-charts null-range noise', () => {
+  assert.equal(shouldIgnoreRangeSyncError(new Error('Value is null')), true);
+  assert.equal(shouldIgnoreRangeSyncError(new Error('boom')), false);
+});
