@@ -12,10 +12,10 @@ app.innerHTML = `
       <section class="brand-deck">
         <p class="brand-kicker">BANANAS31 // OPERATOR COCKPIT</p>
         <div class="brand-heading-row">
-          <h1 class="brand-title">Carry, Basis, Pressure.</h1>
+          <h1 class="brand-title">Carry / Basis / Pressure</h1>
           <div class="signal-badge" id="sync-state">History Synced</div>
         </div>
-        <p class="brand-subtitle">A clean-room command surface for historical context, synchronized market structure, operator-grade visibility across spot, perp, funding, and open interest, and replay locks for high-signal market windows.</p>
+        <p class="brand-subtitle">Historical context locked to price, carry, leverage, and funding without ornamental admin chrome.</p>
       </section>
 
       <aside class="mission-card">
@@ -45,21 +45,21 @@ app.innerHTML = `
       </div>
 
       <div class="toolbar-group focus-group" id="focus-group">
-        <button data-focus="all" class="active">Full Stack</button>
-        <button data-focus="basis">Carry Focus</button>
-        <button data-focus="leverage">Leverage Focus</button>
-        <button data-focus="funding">Reset Focus</button>
+        <button data-focus="all" class="active">All</button>
+        <button data-focus="basis">Carry</button>
+        <button data-focus="leverage">Leverage</button>
+        <button data-focus="funding">Funding</button>
       </div>
 
       <div class="toolbar-group mode-group" id="mode-group">
-        <button data-live-reset class="active">Live Stack</button>
+        <button data-live-reset class="active">Live</button>
         <button data-replay-indicator disabled>Replay Idle</button>
       </div>
 
       <div class="feed-strip">
-        <span class="feed-chip spot">BN Spot</span>
+        <span class="feed-chip spot">Spot</span>
         <span class="feed-chip perp">BN Perp</span>
-        <span class="feed-chip bybit">Bybit Perp</span>
+        <span class="feed-chip bybit">Bybit</span>
         <span class="feed-chip dex">DEX</span>
       </div>
     </section>
@@ -274,7 +274,7 @@ function updateStatusHeadline() {
   syncState.textContent = pickReplayModeLabel(state.replayEvent, state.focusMode);
   replayIndicatorButton.textContent = state.replayEvent
     ? `${state.replayEvent.title} · ${formatTimestamp(state.replayEvent.time)}`
-    : 'Replay Idle';
+    : 'Replay';
   replayIndicatorButton.classList.toggle('active', Boolean(state.replayEvent));
   liveResetButton.classList.toggle('active', !state.replayEvent);
 }
@@ -390,26 +390,26 @@ function makeChart(containerId, opts = {}) {
   const chart = createChart(container, {
     autoSize: true,
     layout: {
-      background: { color: '#09111a' },
-      textColor: '#8d98b7',
+      background: { color: '#06090f' },
+      textColor: '#8b96b3',
       fontFamily: '"IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif'
     },
     grid: {
-      vertLines: { color: 'rgba(132, 151, 196, 0.05)' },
-      horzLines: { color: 'rgba(132, 151, 196, 0.06)' }
+      vertLines: { color: 'rgba(132, 151, 196, 0.035)' },
+      horzLines: { color: 'rgba(132, 151, 196, 0.04)' }
     },
     rightPriceScale: {
-      borderColor: 'rgba(132, 151, 196, 0.12)'
+      borderColor: 'rgba(132, 151, 196, 0.08)'
     },
     timeScale: {
-      borderColor: 'rgba(132, 151, 196, 0.12)',
+      borderColor: 'rgba(132, 151, 196, 0.08)',
       timeVisible: true,
       secondsVisible: false,
-      rightOffset: 6
+      rightOffset: 4
     },
     crosshair: {
-      vertLine: { color: 'rgba(90, 209, 255, 0.25)' },
-      horzLine: { color: 'rgba(90, 209, 255, 0.25)' }
+      vertLine: { color: 'rgba(90, 209, 255, 0.16)' },
+      horzLine: { color: 'rgba(90, 209, 255, 0.16)' }
     },
     ...opts
   });
