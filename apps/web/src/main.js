@@ -69,13 +69,6 @@ app.innerHTML = `
         <button data-replay-indicator disabled>Replay Idle</button>
       </div>
 
-      <div class="feed-strip">
-        <span class="feed-chip spot">Spot</span>
-        <span class="feed-chip perp">BN Perp</span>
-        <span class="feed-chip bybit">Bybit</span>
-        <span class="feed-chip dex">DEX</span>
-      </div>
-
       <div class="command-note" id="command-note">1/2/3 · A/C/L/F · J/K · Esc</div>
     </section>
 
@@ -96,8 +89,7 @@ app.innerHTML = `
           <article class="panel" id="basis-panel">
             <div class="panel-header">
               <div>
-                <p class="panel-kicker">Carry</p>
-                <h2 class="panel-title">Basis Regime</h2>
+                <h2 class="panel-title">Basis</h2>
               </div>
               <span class="panel-meta" id="basis-meta">Aggregated venue spread</span>
             </div>
@@ -107,8 +99,7 @@ app.innerHTML = `
           <article class="panel" id="oi-panel">
             <div class="panel-header">
               <div>
-                <p class="panel-kicker">Leverage</p>
-                <h2 class="panel-title">Perp Open Interest</h2>
+                <h2 class="panel-title">Perp OI</h2>
               </div>
               <span class="panel-meta" id="oi-meta">Aggregated and venue split</span>
             </div>
@@ -118,7 +109,6 @@ app.innerHTML = `
           <article class="panel" id="funding-panel">
             <div class="panel-header">
               <div>
-                <p class="panel-kicker">Reset</p>
                 <h2 class="panel-title">Funding</h2>
               </div>
               <span class="panel-meta" id="funding-meta">8h venue funding tape</span>
@@ -132,7 +122,6 @@ app.innerHTML = `
         <article class="panel rail-card">
           <div class="panel-header">
             <div>
-              <p class="panel-kicker">Replay</p>
               <h2 class="panel-title">Replay Tape</h2>
             </div>
             <span class="panel-meta" id="replay-meta">J/K step · Esc live</span>
@@ -277,7 +266,7 @@ function updateStatusHeadline() {
   replayIndicatorButton.classList.toggle('active', Boolean(state.replayEvent));
   liveResetButton.classList.toggle('active', !state.replayEvent);
   commandNote.textContent = state.replayEvent
-    ? `Replay · J/K · Esc · ${state.interval.toUpperCase()}`
+    ? `J/K · Esc · ${state.interval.toUpperCase()}`
     : '1/2/3 · A/C/L/F · J/K · Esc';
 }
 
@@ -527,11 +516,11 @@ function stepReplayEvent(direction) {
 
 function updatePanelMeta(data) {
   priceMeta.textContent = state.replayEvent
-    ? `${barsLabel(data.spot.bars.length)} · replay window anchored`
-    : `${barsLabel(data.spot.bars.length)} · spot with perp overlays`;
-  basisMeta.textContent = `${data.basis.aggregated.length} aggregated points · two venues`;
-  oiMeta.textContent = `${data.oi.aggregated.length} aggregated points · Binance + Bybit perp only`;
-  fundingMeta.textContent = `${(data.funding.per_source?.['binance-perp'] || []).length} resets · venue split`;
+    ? `${data.spot.bars.length} ${state.interval.toUpperCase()} · replay lock`
+    : `${data.spot.bars.length} ${state.interval.toUpperCase()} · spot + perp`;
+  basisMeta.textContent = `${data.basis.aggregated.length} agg · 2 venues`;
+  oiMeta.textContent = `${data.oi.aggregated.length} agg · perp only`;
+  fundingMeta.textContent = `${(data.funding.per_source?.['binance-perp'] || []).length} resets`;
 }
 
 async function loadCockpit() {
