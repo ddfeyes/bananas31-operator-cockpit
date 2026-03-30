@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS dex_price (
 
 
 def main() -> None:
-    target = Path(__file__).resolve().parents[1] / "data" / "demo.db"
+    target = Path(__file__).resolve().parents[1] / "data" / "sample.db"
     target.parent.mkdir(parents=True, exist_ok=True)
 
     now = int(time.time() // 3600 * 3600)

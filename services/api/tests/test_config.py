@@ -19,7 +19,7 @@ def test_resolve_default_db_path_prefers_repo_database(tmp_path: Path) -> None:
     config_file.write_text("# fixture\n")
     real_db = data_root / "aggdash.db"
     real_db.write_text("fixture\n")
-    (data_root / "demo.db").write_text("demo\n")
+    (data_root / "sample.db").write_text("sample\n")
 
     assert resolve_default_db_path(config_file) == real_db
     assert resolve_default_web_dist(config_file) == web_dist

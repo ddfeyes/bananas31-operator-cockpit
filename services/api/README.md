@@ -8,7 +8,7 @@ Data priority:
 - `services/api/data/aggdash.db` when a recovered local copy exists
 - `/app/data/aggdash.db` inside the preview container
 
-`services/api/data/demo.db` remains a seed artifact for explicit scripts only. Runtime code no longer falls back to it automatically.
+`services/api/data/sample.db` remains an explicit seed artifact for scripted cold starts only. Runtime code no longer falls back to it automatically.
 
 Planned responsibilities:
 

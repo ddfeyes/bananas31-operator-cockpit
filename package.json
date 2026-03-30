@@ -9,7 +9,7 @@
     "test:web": "node --test apps/web/tests/*.test.mjs",
     "build:web": "pnpm --filter @bananas31/web build",
     "test:api": "cd services/api && UV_CACHE_DIR=../../.cache/uv uv run pytest",
-    "seed:demo-db": "cd services/api && UV_CACHE_DIR=../../.cache/uv uv run python scripts/seed_demo_db.py",
+    "seed:sample-db": "cd services/api && UV_CACHE_DIR=../../.cache/uv uv run python scripts/seed_sample_db.py",
     "serve:api": "cd services/api && UV_CACHE_DIR=../../.cache/uv uv run uvicorn app.main:app --host 127.0.0.1 --port 8010"
   }
 }
