@@ -34,16 +34,8 @@ app.innerHTML = `
           <strong id="live-regime">Loading…</strong>
         </div>
         <div class="mission-row">
-          <span>Window</span>
-          <strong id="session-window">Waiting for feed</strong>
-        </div>
-        <div class="mission-row">
-          <span>24H Range</span>
+          <span>Range</span>
           <strong id="session-range">Waiting for feed</strong>
-        </div>
-        <div class="mission-row">
-          <span>Data Health</span>
-          <strong id="data-health">Connecting</strong>
         </div>
       </section>
     </header>
@@ -157,9 +149,7 @@ const focusButtons = [...document.querySelectorAll('[data-focus]')];
 const liveResetButton = document.querySelector('[data-live-reset]');
 const replayIndicatorButton = document.querySelector('[data-replay-indicator]');
 const liveRegime = document.querySelector('#live-regime');
-const sessionWindow = document.querySelector('#session-window');
 const sessionRange = document.querySelector('#session-range');
-const dataHealth = document.querySelector('#data-health');
 const syncState = document.querySelector('#sync-state');
 const replayMeta = document.querySelector('#replay-meta');
 const priceMeta = document.querySelector('#price-meta');
@@ -181,7 +171,9 @@ const state = {
   focusMode: persistedPrefs.focusMode,
   replayEvent: null,
   replayEvents: [],
-  payload: null
+  payload: null,
+  healthLabel: 'Connecting',
+  windowLabel: 'Waiting'
 };
 
 function persistCockpitPrefs() {
@@ -210,6 +202,28 @@ function formatTimestamp(timestamp) {
   });
 }
 
+function formatLedgerTimestamp(timestamp) {
+  if (!timestamp) return '—';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(new Date(timestamp * 1000));
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.month} ${values.day} ${values.hour}:${values.minute}`;
+}
+
+function formatTimeCompact(timestamp) {
+  if (!timestamp) return '—';
+  return new Date(timestamp * 1000).toLocaleString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+}
+
 function barsLabel(count) {
   return `${count} ${state.interval.toUpperCase()} bars`;
 }
@@ -232,30 +246,30 @@ function deriveSessionThesis(snapshot) {
   const items = [];
 
   if (basis < 0) {
-    items.push(`Carry defensive · basis ${formatPercent(basis, 2)}`);
+    items.push(['Carry', `Defensive · ${formatPercent(basis, 2)}`]);
   } else {
-    items.push(`Carry engaged · basis ${formatPercent(basis, 2)}`);
+    items.push(['Carry', `Engaged · ${formatPercent(basis, 2)}`]);
   }
 
   if (funding > 0.05) {
-    items.push(`Funding hot · reset ${formatPercent(funding, 4)}`);
+    items.push(['Funding', `Hot · ${formatPercent(funding, 4)}`]);
   } else if (funding < 0) {
-    items.push(`Funding negative · squeeze risk live`);
+    items.push(['Funding', 'Negative · squeeze risk']);
   } else {
-    items.push(`Funding calm · reset ${formatPercent(funding, 4)}`);
+    items.push(['Funding', `Calm · ${formatPercent(funding, 4)}`]);
   }
 
   if (oi >= 7_500_000_000) {
-    items.push(`Leverage heavy · OI ${formatCompact(oi)}`);
+    items.push(['Leverage', `Heavy · ${formatCompact(oi)}`]);
   } else {
-    items.push(`Leverage moderate · OI ${formatCompact(oi)}`);
+    items.push(['Leverage', `Moderate · ${formatCompact(oi)}`]);
   }
 
   return items;
 }
 
 function updateStatusHeadline() {
-  syncState.textContent = pickReplayModeLabel(state.replayEvent, state.focusMode);
+  syncState.textContent = `${pickReplayModeLabel(state.replayEvent, state.focusMode)} · ${state.windowLabel} · ${state.healthLabel}`;
   replayIndicatorButton.textContent = state.replayEvent
     ? compactReplayFocus(state.replayEvent.focus_mode)
     : 'Idle';
@@ -280,12 +294,17 @@ function renderSummary(snapshot) {
     </article>
   `).join('');
 
-  const regime = snapshot.summary.basis_agg_pct >= 0 ? 'Carry On / Contango' : 'Defensive / Backwardation';
+  const regime = snapshot.summary.basis_agg_pct >= 0 ? 'Carry On' : 'Defensive';
   liveRegime.textContent = regime;
   sessionRange.textContent = `${formatPrice(snapshot.summary.low_24h)} → ${formatPrice(snapshot.summary.high_24h)}`;
 
   thesisList.innerHTML = deriveSessionThesis(snapshot)
-    .map((item) => `<li>${item}</li>`)
+    .map(([label, value]) => `
+      <li>
+        <span class="thesis-key">${label}</span>
+        <span class="thesis-value">${value}</span>
+      </li>
+    `)
     .join('');
 }
 
@@ -303,21 +322,20 @@ function renderCoverage(data) {
     const count = Array.isArray(series) ? series.length : 0;
     const status = coverageStatus(count);
     return `
-      <div class="coverage-item">
-        <div class="coverage-item-head">
-          <span>${label}</span>
-          <span class="coverage-pill ${status.tone}">${count}</span>
+        <div class="coverage-item">
+          <span class="coverage-item-source">${label}</span>
+          <span class="coverage-item-count ${status.tone}">${count}</span>
+          <span class="coverage-item-time">${formatLedgerTimestamp(timestamp)}</span>
         </div>
-        <div class="coverage-item-meta">${status.label} · ${formatTimestamp(timestamp)}</div>
-      </div>
     `;
   }).join('');
 
   const totalSignals = rows.reduce((sum, [, series]) => sum + (Array.isArray(series) ? series.length : 0), 0);
-  dataHealth.textContent = totalSignals >= 700 ? 'Healthy' : 'Partial';
-  sessionWindow.textContent = state.replayEvent
-    ? `${state.replayEvent.title} · ${formatTimestamp(state.replayEvent.time)}`
-    : `${barsLabel(data.spot.bars.length)} · ${formatTimestamp(lastPointTime(data.spot.bars))}`;
+  state.healthLabel = totalSignals >= 700 ? 'Healthy' : 'Partial';
+  state.windowLabel = state.replayEvent
+    ? `${state.interval.toUpperCase()} · ${formatTimeCompact(state.replayEvent.time)}`
+    : `${state.interval.toUpperCase()} · ${formatTimeCompact(lastPointTime(data.spot.bars))}`;
+  updateStatusHeadline();
 }
 
 function renderReplayEvents(events) {
