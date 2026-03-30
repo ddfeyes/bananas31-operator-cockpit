@@ -168,7 +168,7 @@ body::before {
 
 .summary-tape {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 0;
   margin-bottom: 6px;
   border-bottom: 1px solid var(--line);
@@ -571,10 +571,6 @@ body::before {
 }
 
 @media (max-width: 1320px) {
-  .summary-tape {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
   .workspace-grid,
   .support-grid,
   .masthead {
@@ -589,8 +585,7 @@ body::before {
 @media (max-width: 980px) {
   .analytics-row,
   .command-rail,
-  .support-grid,
-  .summary-tape {
+  .support-grid {
     grid-template-columns: 1fr;
   }
 
