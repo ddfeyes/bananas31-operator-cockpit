@@ -54,7 +54,7 @@ body::before {
 .app-shell {
   width: min(1820px, calc(100vw - 24px));
   margin: 0 auto;
-  padding: 10px 0 18px;
+  padding: 8px 0 14px;
 }
 
 .masthead,
@@ -68,9 +68,9 @@ body::before {
 .masthead {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 18px;
+  gap: 14px;
   align-items: end;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 
 .brand-deck,
@@ -175,13 +175,13 @@ body::before {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   gap: 0;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .summary-card {
   position: relative;
   overflow: hidden;
-  padding: 4px 8px 5px;
+  padding: 3px 8px 4px;
   min-height: 0;
   border-left: 1px solid var(--line);
 }
@@ -191,9 +191,9 @@ body::before {
 }
 
 .summary-card-value {
-  margin-top: 2px;
+  margin-top: 1px;
   font-family: var(--mono);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: -0.04em;
 }
@@ -202,9 +202,9 @@ body::before {
   display: grid;
   grid-template-columns: auto auto 1fr;
   gap: 6px 12px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   align-items: center;
-  padding: 2px 0 4px;
+  padding: 1px 0 3px;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
@@ -323,11 +323,11 @@ body::before {
 }
 
 .chart-slot-hero {
-  height: clamp(434px, 58vh, 780px);
+  height: clamp(402px, 54vh, 760px);
 }
 
 .chart-slot-compact {
-  height: clamp(106px, 16vh, 196px);
+  height: clamp(92px, 13vh, 180px);
 }
 
 .support-card {
