@@ -58,13 +58,24 @@ def resample_ohlcv(rows: list[sqlite3.Row], interval: str) -> list[dict[str, Any
     return [buckets[key] for key in sorted(buckets)]
 
 
-def resample_last_value(rows: list[sqlite3.Row], interval: str, value_key: str) -> list[dict[str, Any]]:
+def resample_last_value(
+    rows: list[sqlite3.Row],
+    interval: str,
+    value_key: str,
+    *,
+    skip_non_positive: bool = False,
+) -> list[dict[str, Any]]:
     buckets: dict[int, dict[str, Any]] = {}
     for row in rows:
+        value = row[value_key]
+        if value is None:
+            continue
+        if skip_non_positive and value <= 0:
+            continue
         bucket = bucket_timestamp(row["timestamp"], interval)
         buckets[bucket] = {
             "time": bucket,
-            "value": row[value_key],
+            "value": value,
         }
     return [buckets[key] for key in sorted(buckets)]
 
@@ -106,7 +117,18 @@ def fetch_latest_snapshot(database: Database) -> dict[str, Any]:
             (now - 86400 * 30,),
         ).fetchall()
         oi_rows = connection.execute(
-            "SELECT exchange_id, open_interest FROM oi ORDER BY timestamp DESC LIMIT 2"
+            """
+            SELECT ranked.exchange_id, ranked.open_interest
+            FROM (
+                SELECT
+                    exchange_id,
+                    open_interest,
+                    ROW_NUMBER() OVER (PARTITION BY exchange_id ORDER BY timestamp DESC) AS row_number
+                FROM oi
+                WHERE open_interest IS NOT NULL AND open_interest > 0
+            ) ranked
+            WHERE ranked.row_number = 1
+            """
         ).fetchall()
 
         basis = fetch_basis_series(database, 86400 * 2, "4h")
@@ -203,7 +225,12 @@ def fetch_oi_series(database: Database, minutes: int, interval: str) -> dict[str
         grouped[row["exchange_id"]].append(row)
 
     per_source = {
-        exchange_id: resample_last_value(source_rows, interval, "open_interest")
+        exchange_id: resample_last_value(
+            source_rows,
+            interval,
+            "open_interest",
+            skip_non_positive=True,
+        )
         for exchange_id, source_rows in grouped.items()
     }
 

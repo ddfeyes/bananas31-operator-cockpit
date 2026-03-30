@@ -163,6 +163,11 @@ const fundingMeta = document.querySelector('#funding-meta');
 
 const charts = {};
 const persistedPrefs = readStoredCockpitPrefs();
+const HISTORY_WINDOW_MINUTES = {
+  '1h': 60 * 24 * 180,
+  '4h': 60 * 24 * 365,
+  '1d': 60 * 24 * 730
+};
 const panelElements = {
   price: document.querySelector('#price-panel'),
   basis: document.querySelector('#basis-panel'),
@@ -177,7 +182,8 @@ const state = {
   replayEvents: [],
   payload: null,
   healthLabel: 'Connecting',
-  windowLabel: 'Waiting'
+  windowLabel: 'Waiting',
+  loadRequestId: 0
 };
 
 function persistCockpitPrefs() {
@@ -239,6 +245,10 @@ function formatCoverageFreshness(timestamp, referenceTimestamp) {
 
 function barsLabel(count) {
   return `${count} ${state.interval.toUpperCase()} bars`;
+}
+
+function historyWindowMinutes(interval) {
+  return HISTORY_WINDOW_MINUTES[interval] || HISTORY_WINDOW_MINUTES['4h'];
 }
 
 function lastPointTime(series) {
@@ -446,18 +456,36 @@ function createCharts() {
   });
 
   charts.basis = makeChart('#basis-chart');
-  charts.basis.binance = charts.basis.chart.addSeries(LineSeries, { color: '#ffbc42', lineWidth: 1 });
-  charts.basis.bybit = charts.basis.chart.addSeries(LineSeries, { color: '#9a7cff', lineWidth: 1 });
-  charts.basis.agg = charts.basis.chart.addSeries(LineSeries, { color: '#5ad1ff', lineWidth: 2 });
+  const percentFormat = {
+    type: 'custom',
+    minMove: 0.0001,
+    formatter: (value) => `${Number(value).toFixed(2)}%`
+  };
+  charts.basis.binance = charts.basis.chart.addSeries(LineSeries, { color: '#ffbc42', lineWidth: 1, priceFormat: percentFormat });
+  charts.basis.bybit = charts.basis.chart.addSeries(LineSeries, { color: '#9a7cff', lineWidth: 1, priceFormat: percentFormat });
+  charts.basis.agg = charts.basis.chart.addSeries(LineSeries, { color: '#5ad1ff', lineWidth: 2, priceFormat: percentFormat });
 
   charts.oi = makeChart('#oi-chart');
-  charts.oi.binance = charts.oi.chart.addSeries(LineSeries, { color: '#ffbc42', lineWidth: 1 });
-  charts.oi.bybit = charts.oi.chart.addSeries(LineSeries, { color: '#9a7cff', lineWidth: 1 });
-  charts.oi.agg = charts.oi.chart.addSeries(LineSeries, { color: '#d7dde9', lineWidth: 2 });
+  const oiFormat = {
+    type: 'custom',
+    minMove: 1,
+    formatter: (value) => formatCompact(Number(value))
+  };
+  charts.oi.binance = charts.oi.chart.addSeries(LineSeries, { color: '#ffbc42', lineWidth: 1, priceFormat: oiFormat });
+  charts.oi.bybit = charts.oi.chart.addSeries(LineSeries, { color: '#9a7cff', lineWidth: 1, priceFormat: oiFormat });
+  charts.oi.agg = charts.oi.chart.addSeries(LineSeries, { color: '#d7dde9', lineWidth: 2, priceFormat: oiFormat });
 
   charts.funding = makeChart('#funding-chart');
-  charts.funding.binance = charts.funding.chart.addSeries(LineSeries, { color: '#ffbc42', lineWidth: 1 });
-  charts.funding.bybit = charts.funding.chart.addSeries(LineSeries, { color: '#9a7cff', lineWidth: 1 });
+  charts.funding.binance = charts.funding.chart.addSeries(LineSeries, {
+    color: '#ffbc42',
+    lineWidth: 1,
+    priceFormat: percentFormat,
+  });
+  charts.funding.bybit = charts.funding.chart.addSeries(LineSeries, {
+    color: '#9a7cff',
+    lineWidth: 1,
+    priceFormat: percentFormat,
+  });
 
   createActiveChartSync([
     charts.price,
@@ -552,22 +580,26 @@ function updatePanelMeta(data) {
 }
 
 async function loadCockpit() {
-  const minutes = state.interval === '1d'
-    ? 60 * 24 * 120
-    : state.interval === '1h'
-      ? 60 * 24 * 14
-      : 60 * 24 * 30;
+  const requestId = ++state.loadRequestId;
+  const interval = state.interval;
+  const minutes = historyWindowMinutes(interval);
+  syncState.textContent = `Loading · ${interval.toUpperCase()}`;
+  replayMeta.textContent = 'Loading';
 
   const [snapshot, spot, perp, bybit, basis, oi, funding, replay] = await Promise.all([
     fetchSnapshot(),
-    fetchOhlcv('binance-spot', minutes, state.interval),
-    fetchOhlcv('binance-perp', minutes, state.interval),
-    fetchOhlcv('bybit-perp', minutes, state.interval),
-    fetchBasis(minutes * 60, state.interval),
-    fetchOi(minutes, state.interval),
-    fetchFunding(minutes * 60, INTERVAL_TO_SECONDS[state.interval] || 14400),
-    fetchReplayEvents(minutes * 60, state.interval, 6)
+    fetchOhlcv('binance-spot', minutes, interval),
+    fetchOhlcv('binance-perp', minutes, interval),
+    fetchOhlcv('bybit-perp', minutes, interval),
+    fetchBasis(minutes * 60, interval),
+    fetchOi(minutes, interval),
+    fetchFunding(minutes * 60, INTERVAL_TO_SECONDS[interval] || 14400),
+    fetchReplayEvents(minutes * 60, interval, 6)
   ]);
+
+  if (requestId !== state.loadRequestId || interval !== state.interval) {
+    return;
+  }
 
   const payload = { snapshot, spot, perp, bybit, basis, oi, funding, replay };
   state.payload = payload;
@@ -621,8 +653,8 @@ async function loadCockpit() {
   charts.oi.bybit.setData((oi.per_source?.['bybit-perp'] || []).map((point) => ({ time: point.time, value: point.value })));
   charts.oi.agg.setData((oi.aggregated || []).map((point) => ({ time: point.time, value: point.value })));
 
-  charts.funding.binance.setData((funding.per_source?.['binance-perp'] || []).map((point) => ({ time: point.time, value: point.rate_8h })));
-  charts.funding.bybit.setData((funding.per_source?.['bybit-perp'] || []).map((point) => ({ time: point.time, value: point.rate_8h })));
+  charts.funding.binance.setData((funding.per_source?.['binance-perp'] || []).map((point) => ({ time: point.time, value: point.rate_8h * 100 })));
+  charts.funding.bybit.setData((funding.per_source?.['bybit-perp'] || []).map((point) => ({ time: point.time, value: point.rate_8h * 100 })));
 
   applyRanges(spotBars);
   setFocusMode(state.focusMode, { preserveReplay: true });

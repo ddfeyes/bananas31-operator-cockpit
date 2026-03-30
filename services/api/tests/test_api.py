@@ -65,6 +65,7 @@ def seed_database(path: Path) -> None:
             [
                 ("binance-perp", first, 1_000_000.0),
                 ("binance-perp", second, 1_100_000.0),
+                ("binance-perp", second + 60, 0.0),
                 ("bybit-perp", first, 600_000.0),
                 ("bybit-perp", second, 610_000.0),
             ],
@@ -96,6 +97,7 @@ def test_history_endpoints_return_expected_shapes(tmp_path: Path) -> None:
     snapshot = client.get("/api/snapshot").json()
     assert snapshot["prices"]["binance-spot"] == 1.2
     assert snapshot["prices"]["dex"] == 1.19
+    assert snapshot["summary"]["oi_total"] == 1_710_000.0
 
     ohlcv = client.get("/api/history/ohlcv", params={"exchange_id": "binance-spot", "minutes": 10_000_000, "interval": "1h"}).json()
     assert ohlcv["count"] == 2
@@ -108,6 +110,7 @@ def test_history_endpoints_return_expected_shapes(tmp_path: Path) -> None:
     oi = client.get("/api/history/oi", params={"minutes": 10_000_000, "interval": "1h"}).json()
     assert len(oi["aggregated"]) == 2
     assert len(oi["per_source"]["binance-perp"]) == 2
+    assert oi["per_source"]["binance-perp"][-1]["value"] == 1_100_000.0
 
     funding = client.get("/api/history/funding", params={"window_secs": 10_000_000, "interval_secs": 3600}).json()
     assert len(funding["per_source"]["binance-perp"]) == 1
