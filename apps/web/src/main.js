@@ -12,14 +12,16 @@ app.innerHTML = `
   <div class="app-shell">
     <header class="masthead">
       <section class="brand-deck">
-        <p class="brand-kicker">BANANAS31 // OPERATOR COCKPIT</p>
         <div class="brand-heading-row">
-          <h1 class="brand-title">Carry / Basis / Pressure</h1>
+          <div class="brand-mark">
+            <p class="brand-kicker">BANANAS31</p>
+            <h1 class="brand-title">Operator Cockpit</h1>
+          </div>
           <div class="signal-badge" id="sync-state">History Synced</div>
         </div>
       </section>
 
-      <aside class="mission-card">
+      <section class="mission-card">
         <div class="mission-row">
           <span>Regime</span>
           <strong id="live-regime">Loading…</strong>
@@ -36,7 +38,7 @@ app.innerHTML = `
           <span>Data Health</span>
           <strong id="data-health">Connecting</strong>
         </div>
-      </aside>
+      </section>
     </header>
 
     <section class="summary-tape" id="summary-grid"></section>
@@ -134,24 +136,18 @@ app.innerHTML = `
     </section>
 
     <section class="support-grid">
-      <article class="panel support-card">
-        <div class="panel-header">
-          <div>
-            <p class="panel-kicker">Coverage</p>
-            <h2 class="panel-title">Data Footprint</h2>
-          </div>
-          <span class="panel-meta">Bars and freshness</span>
+      <article class="support-card support-cluster">
+        <div class="support-head">
+          <p class="support-kicker">Coverage</p>
+          <span class="support-meta">Bars · freshness</span>
         </div>
         <div class="coverage-list" id="coverage-list"></div>
       </article>
 
-      <article class="panel support-card">
-        <div class="panel-header">
-          <div>
-            <p class="panel-kicker">Reading</p>
-            <h2 class="panel-title">Session Thesis</h2>
-          </div>
-          <span class="panel-meta">What matters now</span>
+      <article class="support-card support-cluster">
+        <div class="support-head">
+          <p class="support-kicker">Reading</p>
+          <span class="support-meta">Current posture</span>
         </div>
         <ul class="thesis-list" id="thesis-list"></ul>
       </article>
@@ -280,19 +276,18 @@ function updateStatusHeadline() {
 
 function renderSummary(snapshot) {
   const cards = [
-    ['Spot', formatPrice(snapshot.prices['binance-spot']), 'Binance spot close'],
-    ['Perp', formatPrice(snapshot.prices['binance-perp']), 'Binance perp close'],
-    ['DEX', formatPrice(snapshot.prices.dex), 'On-chain reference'],
-    ['Basis', formatPercent(snapshot.summary.basis_agg_pct, 4), 'Aggregated carry spread'],
-    ['Bybit', formatPrice(snapshot.prices['bybit-perp']), 'Bybit perp close'],
-    ['Perp OI', formatCompact(snapshot.summary.oi_total), 'Binance + Bybit perp total']
+    ['Spot', formatPrice(snapshot.prices['binance-spot'])],
+    ['Perp', formatPrice(snapshot.prices['binance-perp'])],
+    ['DEX', formatPrice(snapshot.prices.dex)],
+    ['Basis', formatPercent(snapshot.summary.basis_agg_pct, 4)],
+    ['Bybit', formatPrice(snapshot.prices['bybit-perp'])],
+    ['Perp OI', formatCompact(snapshot.summary.oi_total)]
   ];
 
-  summaryGrid.innerHTML = cards.map(([label, value, meta]) => `
+  summaryGrid.innerHTML = cards.map(([label, value]) => `
     <article class="summary-card">
       <div class="summary-card-label">${label}</div>
       <div class="summary-card-value">${value}</div>
-      <div class="summary-card-meta">${meta}</div>
     </article>
   `).join('');
 
@@ -322,9 +317,9 @@ function renderCoverage(data) {
       <div class="coverage-item">
         <div class="coverage-item-head">
           <span>${label}</span>
-          <span class="coverage-pill ${status.tone}">${status.label}</span>
+          <span class="coverage-pill ${status.tone}">${count}</span>
         </div>
-        <div class="coverage-item-meta">${count} points · last ${formatTimestamp(timestamp)}</div>
+        <div class="coverage-item-meta">${status.label} · ${formatTimestamp(timestamp)}</div>
       </div>
     `;
   }).join('');
