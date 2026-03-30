@@ -55,6 +55,10 @@ body::before {
   width: min(1820px, calc(100vw - 24px));
   margin: 0 auto;
   padding: 8px 0 14px;
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  align-content: start;
 }
 
 .masthead,
@@ -251,6 +255,7 @@ body::before {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
   align-items: start;
+  min-height: 0;
 }
 
 .support-grid {
@@ -268,6 +273,8 @@ body::before {
   gap: 4px;
   align-content: start;
   align-items: start;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 
 .analytics-row {
@@ -284,6 +291,12 @@ body::before {
   border-top: 1px solid var(--line);
   align-self: start;
   transition: opacity 180ms ease, transform 180ms ease, border-color 180ms ease;
+}
+
+.panel-hero {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
 }
 
 .panel-muted {
@@ -323,7 +336,8 @@ body::before {
 }
 
 .chart-slot-hero {
-  height: clamp(402px, 54vh, 760px);
+  height: 100%;
+  min-height: 402px;
 }
 
 .chart-slot-compact {
