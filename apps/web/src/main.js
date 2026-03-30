@@ -17,7 +17,6 @@ app.innerHTML = `
           <h1 class="brand-title">Carry / Basis / Pressure</h1>
           <div class="signal-badge" id="sync-state">History Synced</div>
         </div>
-        <p class="brand-subtitle">Historical context locked to price, carry, leverage, and funding without ornamental admin chrome.</p>
       </section>
 
       <aside class="mission-card">
@@ -30,10 +29,13 @@ app.innerHTML = `
           <strong id="session-window">Waiting for feed</strong>
         </div>
         <div class="mission-row">
+          <span>24H Range</span>
+          <strong id="session-range">Waiting for feed</strong>
+        </div>
+        <div class="mission-row">
           <span>Data Health</span>
           <strong id="data-health">Connecting</strong>
         </div>
-        <p class="mission-note" id="live-regime-detail">Waiting for snapshot</p>
       </aside>
     </header>
 
@@ -65,7 +67,7 @@ app.innerHTML = `
         <span class="feed-chip dex">DEX</span>
       </div>
 
-      <div class="command-note" id="command-note">1/2/3 timeframe · A/C/L/F focus · J/K replay · Esc live</div>
+      <div class="command-note" id="command-note">1/2/3 · A/C/L/F · J/K · Esc</div>
     </section>
 
     <section class="workspace-grid">
@@ -121,21 +123,10 @@ app.innerHTML = `
         <article class="panel rail-card">
           <div class="panel-header">
             <div>
-              <p class="panel-kicker">Brief</p>
-              <h2 class="panel-title">Operator Readout</h2>
-            </div>
-            <span class="panel-meta">Live snapshot</span>
-          </div>
-          <div class="rail-body rail-grid" id="operator-summary">Loading snapshot…</div>
-        </article>
-
-        <article class="panel rail-card">
-          <div class="panel-header">
-            <div>
               <p class="panel-kicker">Replay</p>
               <h2 class="panel-title">Signal Windows</h2>
             </div>
-            <span class="panel-meta">Lock charts to a context window</span>
+            <span class="panel-meta">Context locks</span>
           </div>
           <div class="replay-list" id="replay-list"></div>
         </article>
@@ -169,7 +160,6 @@ app.innerHTML = `
 `;
 
 const summaryGrid = document.querySelector('#summary-grid');
-const operatorSummary = document.querySelector('#operator-summary');
 const replayList = document.querySelector('#replay-list');
 const coverageList = document.querySelector('#coverage-list');
 const thesisList = document.querySelector('#thesis-list');
@@ -179,8 +169,8 @@ const liveResetButton = document.querySelector('[data-live-reset]');
 const replayIndicatorButton = document.querySelector('[data-replay-indicator]');
 const commandNote = document.querySelector('#command-note');
 const liveRegime = document.querySelector('#live-regime');
-const liveRegimeDetail = document.querySelector('#live-regime-detail');
 const sessionWindow = document.querySelector('#session-window');
+const sessionRange = document.querySelector('#session-range');
 const dataHealth = document.querySelector('#data-health');
 const syncState = document.querySelector('#sync-state');
 const priceMeta = document.querySelector('#price-meta');
@@ -253,23 +243,23 @@ function deriveSessionThesis(snapshot) {
   const items = [];
 
   if (basis < 0) {
-    items.push('Perp complex still trades below spot, so pressure remains defensive rather than euphoric.');
+    items.push(`Carry defensive · basis ${formatPercent(basis, 2)}`);
   } else {
-    items.push('Positive basis says carry is back on and longs are paying to stay in the stack.');
+    items.push(`Carry engaged · basis ${formatPercent(basis, 2)}`);
   }
 
   if (funding > 0.05) {
-    items.push('Funding is elevated enough to punish crowded continuation if price stalls.');
+    items.push(`Funding hot · reset ${formatPercent(funding, 4)}`);
   } else if (funding < 0) {
-    items.push('Negative funding keeps short pressure fragile and raises squeeze odds on any upside impulse.');
+    items.push(`Funding negative · squeeze risk live`);
   } else {
-    items.push('Funding is present but not extreme, so basis matters more than the reset tape right now.');
+    items.push(`Funding calm · reset ${formatPercent(funding, 4)}`);
   }
 
   if (oi >= 7_500_000_000) {
-    items.push('Open interest is heavy, which means the next directional move can cascade through leverage rather than drift.');
+    items.push(`Leverage heavy · OI ${formatCompact(oi)}`);
   } else {
-    items.push('Open interest is not yet fully extended, so the market still has room before leverage becomes the whole story.');
+    items.push(`Leverage moderate · OI ${formatCompact(oi)}`);
   }
 
   return items;
@@ -283,17 +273,17 @@ function updateStatusHeadline() {
   replayIndicatorButton.classList.toggle('active', Boolean(state.replayEvent));
   liveResetButton.classList.toggle('active', !state.replayEvent);
   commandNote.textContent = state.replayEvent
-    ? `Replay locked · J/K step windows · Esc clears · ${state.interval.toUpperCase()}`
-    : '1/2/3 timeframe · A/C/L/F focus · J/K replay · Esc live';
+    ? `Replay · J/K · Esc · ${state.interval.toUpperCase()}`
+    : '1/2/3 · A/C/L/F · J/K · Esc';
 }
 
 function renderSummary(snapshot) {
   const cards = [
     ['Spot', formatPrice(snapshot.prices['binance-spot']), 'Binance spot close'],
     ['Perp', formatPrice(snapshot.prices['binance-perp']), 'Binance perp close'],
-    ['Bybit', formatPrice(snapshot.prices['bybit-perp']), 'Bybit perp close'],
+    ['DEX', formatPrice(snapshot.prices.dex), 'On-chain reference'],
     ['Basis', formatPercent(snapshot.summary.basis_agg_pct, 4), 'Aggregated carry spread'],
-    ['Funding', formatPercent(snapshot.summary.funding_avg_8h_pct, 4), 'Average 8h reset'],
+    ['Bybit', formatPrice(snapshot.prices['bybit-perp']), 'Bybit perp close'],
     ['Perp OI', formatCompact(snapshot.summary.oi_total), 'Binance + Bybit perp total']
   ];
 
@@ -307,30 +297,7 @@ function renderSummary(snapshot) {
 
   const regime = snapshot.summary.basis_agg_pct >= 0 ? 'Carry On / Contango' : 'Defensive / Backwardation';
   liveRegime.textContent = regime;
-  liveRegimeDetail.textContent = `Basis ${formatPercent(snapshot.summary.basis_agg_pct, 4)} · Funding ${formatPercent(snapshot.summary.funding_avg_8h_pct, 4)} · Perp OI ${formatCompact(snapshot.summary.oi_total)}`;
-
-  operatorSummary.innerHTML = `
-    <div class="rail-metric">
-      <span>Spot</span>
-      <strong>${formatPrice(snapshot.prices['binance-spot'])}</strong>
-    </div>
-    <div class="rail-metric">
-      <span>Perp</span>
-      <strong>${formatPrice(snapshot.prices['binance-perp'])}</strong>
-    </div>
-    <div class="rail-metric">
-      <span>Bybit</span>
-      <strong>${formatPrice(snapshot.prices['bybit-perp'])}</strong>
-    </div>
-    <div class="rail-metric">
-      <span>DEX</span>
-      <strong>${formatPrice(snapshot.prices.dex)}</strong>
-    </div>
-    <div class="rail-metric wide">
-      <span>24H Range</span>
-      <strong>${formatPrice(snapshot.summary.low_24h)} → ${formatPrice(snapshot.summary.high_24h)}</strong>
-    </div>
-  `;
+  sessionRange.textContent = `${formatPrice(snapshot.summary.low_24h)} → ${formatPrice(snapshot.summary.high_24h)}`;
 
   thesisList.innerHTML = deriveSessionThesis(snapshot)
     .map((item) => `<li>${item}</li>`)
@@ -643,7 +610,7 @@ function selectInterval(interval) {
   persistCockpitPrefs();
   loadCockpit().catch((error) => {
     console.error(error);
-    operatorSummary.innerHTML = `<span class="loading">${error.message}</span>`;
+    replayList.innerHTML = `<span class="loading">${error.message}</span>`;
     dataHealth.textContent = 'Fault';
   });
 }
@@ -696,6 +663,6 @@ createCharts();
 syncControlButtons();
 loadCockpit().catch((error) => {
   console.error(error);
-  operatorSummary.innerHTML = `<span class="loading">${error.message}</span>`;
+  replayList.innerHTML = `<span class="loading">${error.message}</span>`;
   dataHealth.textContent = 'Fault';
 });
