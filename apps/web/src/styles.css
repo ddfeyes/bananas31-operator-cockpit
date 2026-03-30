@@ -323,11 +323,11 @@ body::before {
 }
 
 .chart-slot-hero {
-  height: 434px;
+  height: clamp(434px, 58vh, 780px);
 }
 
 .chart-slot-compact {
-  height: 106px;
+  height: clamp(106px, 16vh, 196px);
 }
 
 .support-card {
