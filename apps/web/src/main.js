@@ -2,6 +2,7 @@ import './styles.css';
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts';
 import { fetchBasis, fetchFunding, fetchOhlcv, fetchOi, fetchReplayEvents, fetchSnapshot } from './lib/api.js';
 import { computeVisibleRange, createActiveChartSync, INTERVAL_TO_SECONDS } from './lib/chartSync.js';
+import { matchHotkeyAction, readStoredCockpitPrefs, resolveReplayNeighbor, writeStoredCockpitPrefs } from './lib/cockpitState.js';
 import { buildFocusMap, buildReplayRange, pickReplayModeLabel } from './lib/replay.js';
 
 const app = document.querySelector('#app');
@@ -62,6 +63,8 @@ app.innerHTML = `
         <span class="feed-chip bybit">Bybit</span>
         <span class="feed-chip dex">DEX</span>
       </div>
+
+      <div class="command-note" id="command-note">1/2/3 timeframe · A/C/L/F focus · J/K replay · Esc live</div>
     </section>
 
     <section class="workspace-grid">
@@ -171,6 +174,7 @@ const intervalButtons = [...document.querySelectorAll('[data-interval]')];
 const focusButtons = [...document.querySelectorAll('[data-focus]')];
 const liveResetButton = document.querySelector('[data-live-reset]');
 const replayIndicatorButton = document.querySelector('[data-replay-indicator]');
+const commandNote = document.querySelector('#command-note');
 const liveRegime = document.querySelector('#live-regime');
 const liveRegimeDetail = document.querySelector('#live-regime-detail');
 const sessionWindow = document.querySelector('#session-window');
@@ -182,6 +186,7 @@ const oiMeta = document.querySelector('#oi-meta');
 const fundingMeta = document.querySelector('#funding-meta');
 
 const charts = {};
+const persistedPrefs = readStoredCockpitPrefs();
 const panelElements = {
   price: document.querySelector('#price-panel'),
   basis: document.querySelector('#basis-panel'),
@@ -190,12 +195,28 @@ const panelElements = {
 };
 
 const state = {
-  interval: '4h',
-  focusMode: 'all',
+  interval: persistedPrefs.interval,
+  focusMode: persistedPrefs.focusMode,
   replayEvent: null,
   replayEvents: [],
   payload: null
 };
+
+function persistCockpitPrefs() {
+  writeStoredCockpitPrefs(undefined, {
+    interval: state.interval,
+    focusMode: state.focusMode
+  });
+}
+
+function syncControlButtons() {
+  intervalButtons.forEach((button) => {
+    button.classList.toggle('active', button.dataset.interval === state.interval);
+  });
+  focusButtons.forEach((button) => {
+    button.classList.toggle('active', button.dataset.focus === state.focusMode);
+  });
+}
 
 function formatNumber(value, digits = 4) {
   if (value == null) return '—';
@@ -277,6 +298,9 @@ function updateStatusHeadline() {
     : 'Replay';
   replayIndicatorButton.classList.toggle('active', Boolean(state.replayEvent));
   liveResetButton.classList.toggle('active', !state.replayEvent);
+  commandNote.textContent = state.replayEvent
+    ? `Replay locked · J/K step windows · Esc clears · ${state.interval.toUpperCase()}`
+    : '1/2/3 timeframe · A/C/L/F focus · J/K replay · Esc live';
 }
 
 function renderSummary(snapshot) {
@@ -489,9 +513,7 @@ function applyRanges(priceBars) {
 
 function setFocusMode(mode, { preserveReplay = true } = {}) {
   state.focusMode = mode;
-  focusButtons.forEach((button) => {
-    button.classList.toggle('active', button.dataset.focus === mode);
-  });
+  syncControlButtons();
 
   const focusMap = buildFocusMap(mode);
   Object.entries(panelElements).forEach(([key, element]) => {
@@ -504,6 +526,7 @@ function setFocusMode(mode, { preserveReplay = true } = {}) {
   }
 
   updateStatusHeadline();
+  persistCockpitPrefs();
   if (state.payload) {
     renderCoverage(state.payload);
   }
@@ -526,6 +549,18 @@ function clearReplayEvent() {
     renderCoverage(state.payload);
     applyRanges(state.payload.spot.bars || []);
   }
+}
+
+function stepReplayEvent(direction) {
+  const nextEvent = resolveReplayNeighbor(
+    state.replayEvents,
+    state.replayEvent?.id,
+    direction === 'next' ? 1 : -1
+  );
+  if (!nextEvent) {
+    return;
+  }
+  applyReplayEvent(nextEvent);
 }
 
 function updatePanelMeta(data) {
@@ -600,16 +635,24 @@ async function loadCockpit() {
   setFocusMode(state.focusMode, { preserveReplay: true });
 }
 
+function selectInterval(interval) {
+  if (!interval || interval === state.interval) {
+    return;
+  }
+
+  state.interval = interval;
+  syncControlButtons();
+  persistCockpitPrefs();
+  loadCockpit().catch((error) => {
+    console.error(error);
+    operatorSummary.innerHTML = `<span class="loading">${error.message}</span>`;
+    dataHealth.textContent = 'Fault';
+  });
+}
+
 intervalButtons.forEach((button) => {
   button.addEventListener('click', () => {
-    intervalButtons.forEach((target) => target.classList.remove('active'));
-    button.classList.add('active');
-    state.interval = button.dataset.interval;
-    loadCockpit().catch((error) => {
-      console.error(error);
-      operatorSummary.innerHTML = `<span class="loading">${error.message}</span>`;
-      dataHealth.textContent = 'Fault';
-    });
+    selectInterval(button.dataset.interval);
   });
 });
 
@@ -624,7 +667,35 @@ liveResetButton.addEventListener('click', () => {
   setFocusMode('all', { preserveReplay: true });
 });
 
+window.addEventListener('keydown', (event) => {
+  const action = matchHotkeyAction(event);
+  if (!action) {
+    return;
+  }
+
+  event.preventDefault();
+
+  if (action.type === 'interval') {
+    selectInterval(action.value);
+    return;
+  }
+
+  if (action.type === 'focus') {
+    setFocusMode(action.value, { preserveReplay: true });
+    return;
+  }
+
+  if (action.type === 'replay') {
+    stepReplayEvent(action.value);
+    return;
+  }
+
+  clearReplayEvent();
+  setFocusMode('all', { preserveReplay: true });
+});
+
 createCharts();
+syncControlButtons();
 loadCockpit().catch((error) => {
   console.error(error);
   operatorSummary.innerHTML = `<span class="loading">${error.message}</span>`;

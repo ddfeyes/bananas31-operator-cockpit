@@ -224,6 +224,15 @@ body::before {
   border-bottom: 1px solid var(--line);
 }
 
+.command-note {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 .toolbar-group {
   display: flex;
   flex-wrap: wrap;
