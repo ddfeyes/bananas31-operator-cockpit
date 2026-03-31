@@ -1,16 +1,16 @@
 :root {
   color-scheme: dark;
-  --ink-0: #140d08;
-  --ink-1: #1f140c;
-  --ink-2: #2a1a10;
-  --ink-3: #372316;
-  --line: rgba(210, 158, 98, 0.12);
-  --line-strong: rgba(210, 158, 98, 0.22);
-  --text: #f9efe6;
-  --muted: #d8b28f;
-  --cyan: #ffb96d;
-  --amber: #ffdc9b;
-  --violet: #e5b1ab;
+  --ink-0: #120a06;
+  --ink-1: #1b1209;
+  --ink-2: #25180d;
+  --ink-3: #332212;
+  --line: rgba(194, 153, 110, 0.1);
+  --line-strong: rgba(194, 153, 110, 0.18);
+  --text: #f3e8dc;
+  --muted: #bea081;
+  --cyan: #e6b17d;
+  --amber: #f4cc8b;
+  --violet: #d4aba1;
   --green: #3ee0a3;
   --red: #ff6b7b;
   --sans: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
@@ -34,8 +34,8 @@ body {
   font-family: var(--sans);
   color: var(--text);
   background:
-    linear-gradient(180deg, rgba(255, 170, 92, 0.2), transparent 140px),
-    linear-gradient(180deg, #1f150b 0%, #140b05 100%);
+    linear-gradient(180deg, rgba(255, 176, 115, 0.14), transparent 140px),
+    linear-gradient(180deg, #1a120a 0%, #120904 100%);
 }
 
 body::before {
@@ -43,10 +43,10 @@ body::before {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  opacity: 0.13;
+  opacity: 0.11;
   background-image:
-    linear-gradient(rgba(255, 182, 116, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 182, 116, 0.05) 1px, transparent 1px);
+    linear-gradient(rgba(255, 184, 130, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 184, 130, 0.04) 1px, transparent 1px);
   background-size: 100% 72px, 72px 100%;
   mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.7), transparent 92%);
 }
@@ -137,7 +137,7 @@ body::before {
   font-size: 10px;
   letter-spacing: 0.14em;
   color: var(--cyan);
-  border-bottom: 1px solid rgba(255, 168, 87, 0.3);
+  border-bottom: 1px solid rgba(230, 177, 125, 0.28);
   flex-shrink: 0;
 }
 
@@ -249,7 +249,7 @@ body::before {
 
 .toolbar-group button.active {
   color: var(--text);
-  border-color: rgba(255, 168, 87, 0.55);
+  border-color: rgba(230, 177, 125, 0.48);
 }
 
 .toolbar-group button:disabled {
@@ -362,7 +362,7 @@ body::before {
 
 .series-toggle-group button.active {
   color: var(--text);
-  border-color: rgba(255, 168, 87, 0.5);
+  border-color: rgba(230, 177, 125, 0.46);
 }
 
 .chart-slot {
@@ -382,7 +382,7 @@ body::before {
   border-top: 1px solid rgba(212, 152, 96, 0.16);
   padding: 8px 10px 10px;
   min-width: 0;
-  background: linear-gradient(180deg, rgba(255, 168, 87, 0.08), rgba(255, 168, 87, 0));
+  background: linear-gradient(180deg, rgba(230, 177, 125, 0.06), rgba(230, 177, 125, 0));
 }
 
 .analytics-row .panel-header {
@@ -422,7 +422,7 @@ body::before {
 }
 
 .replay-list::-webkit-scrollbar-thumb {
-  background: rgba(212, 152, 96, 0.16);
+  background: rgba(196, 152, 111, 0.13);
 }
 
 .replay-item {
@@ -438,13 +438,13 @@ body::before {
 }
 
 .replay-item:hover {
-  color: #fff9f2;
+  color: #fff8f0;
 }
 
 .replay-item.active {
   color: #fff4e6;
-  background: rgba(255, 168, 87, 0.1);
-  border-left: 1px solid rgba(255, 168, 87, 0.6);
+  background: rgba(230, 177, 125, 0.08);
+  border-left: 1px solid rgba(230, 177, 125, 0.5);
   padding-left: 6px;
 }
 
@@ -477,7 +477,7 @@ body::before {
 
 .replay-focus-pill {
   grid-area: focus;
-  color: rgba(255, 168, 87, 0.85);
+  color: rgba(230, 177, 125, 0.82);
   justify-self: end;
   text-align: right;
   font-size: 11px;

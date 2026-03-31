@@ -215,6 +215,23 @@ const oiSeriesButtons = [...document.querySelectorAll('[data-oi-series]')];
 const DEFAULT_INTERVAL = '4h';
 const BASE_INTERVALS = new Set(['1h', '4h', '1d']);
 const MIN_PANEL_WEIGHT = 0.18;
+const CHART_STYLE = {
+  background: '#120a07',
+  text: '#d5c4b0',
+  grid: 'rgba(190, 155, 115, 0.14)',
+  border: 'rgba(190, 155, 115, 0.14)',
+  crosshair: 'rgba(230, 177, 125, 0.14)',
+  volBull: 'rgba(88, 192, 129, 0.32)',
+  volBear: 'rgba(255, 111, 131, 0.32)',
+  upCandle: '#3dd8a5',
+  downCandle: '#ff6d77',
+  candleWickUp: '#3dd8a5',
+  candleWickDown: '#ff6d77',
+  lineBinance: '#f0b97a',
+  lineBybit: '#c68e72',
+  lineDex: '#b6a18f',
+  lineAgg: '#8fb8ab',
+};
 
 const charts = {};
 let chartSyncController = null;
@@ -684,26 +701,26 @@ function makeChart(containerId, opts = {}) {
   const chart = createChart(container, {
     autoSize: true,
     layout: {
-      background: { color: '#06090f' },
-      textColor: '#8b96b3',
+      background: { color: CHART_STYLE.background },
+      textColor: CHART_STYLE.text,
       fontFamily: '"IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif'
     },
     grid: {
-      vertLines: { color: 'rgba(132, 151, 196, 0.035)' },
-      horzLines: { color: 'rgba(132, 151, 196, 0.04)' }
+      vertLines: { color: CHART_STYLE.grid },
+      horzLines: { color: CHART_STYLE.grid }
     },
     rightPriceScale: {
-      borderColor: 'rgba(132, 151, 196, 0.08)'
+      borderColor: CHART_STYLE.border
     },
     timeScale: {
-      borderColor: 'rgba(132, 151, 196, 0.08)',
+      borderColor: CHART_STYLE.border,
       timeVisible: true,
       secondsVisible: false,
       rightOffset: 4
     },
     crosshair: {
-      vertLine: { color: 'rgba(90, 209, 255, 0.16)' },
-      horzLine: { color: 'rgba(90, 209, 255, 0.16)' }
+      vertLine: { color: CHART_STYLE.crosshair },
+      horzLine: { color: CHART_STYLE.crosshair }
     },
     ...opts
   });
@@ -714,35 +731,35 @@ function makeChart(containerId, opts = {}) {
 function createCharts() {
   charts.price = makeChart('#price-chart');
   charts.price.candles = charts.price.chart.addSeries(CandlestickSeries, {
-    upColor: '#19d79d',
-    downColor: '#ff6174',
+    upColor: CHART_STYLE.upCandle,
+    downColor: CHART_STYLE.downCandle,
     borderVisible: false,
-    wickUpColor: '#19d79d',
-    wickDownColor: '#ff6174'
+    wickUpColor: CHART_STYLE.candleWickUp,
+    wickDownColor: CHART_STYLE.candleWickDown
   });
   charts.price.volume = charts.price.chart.addSeries(HistogramSeries, {
     priceFormat: { type: 'volume' },
     priceScaleId: 'volume',
-    color: 'rgba(90, 209, 255, 0.28)'
+    color: CHART_STYLE.volBull
   });
   charts.price.chart.priceScale('volume').applyOptions({
     scaleMargins: { top: 0.76, bottom: 0 },
     visible: false
   });
   charts.price.binancePerp = charts.price.chart.addSeries(LineSeries, {
-    color: '#ffbc42',
+    color: CHART_STYLE.lineBinance,
     lineWidth: 1,
     lastValueVisible: false,
     priceLineVisible: false,
   });
   charts.price.bybitPerp = charts.price.chart.addSeries(LineSeries, {
-    color: '#9a7cff',
+    color: CHART_STYLE.lineBybit,
     lineWidth: 1,
     lastValueVisible: false,
     priceLineVisible: false,
   });
   charts.price.dex = charts.price.chart.addSeries(LineSeries, {
-    color: '#5ad1ff',
+    color: CHART_STYLE.lineDex,
     lineWidth: 1,
     lastValueVisible: false,
     priceLineVisible: false,
@@ -755,21 +772,21 @@ function createCharts() {
     formatter: (value) => `${Number(value).toFixed(2)}%`
   };
   charts.basis.binance = charts.basis.chart.addSeries(LineSeries, {
-    color: '#ffbc42',
+    color: CHART_STYLE.lineBinance,
     lineWidth: 1,
     priceFormat: percentFormat,
     lastValueVisible: false,
     priceLineVisible: false,
   });
   charts.basis.bybit = charts.basis.chart.addSeries(LineSeries, {
-    color: '#9a7cff',
+    color: CHART_STYLE.lineBybit,
     lineWidth: 1,
     priceFormat: percentFormat,
     lastValueVisible: false,
     priceLineVisible: false,
   });
   charts.basis.agg = charts.basis.chart.addSeries(LineSeries, {
-    color: '#5ad1ff',
+    color: CHART_STYLE.lineAgg,
     lineWidth: 2,
     priceFormat: percentFormat,
     lastValueVisible: false,
@@ -783,14 +800,14 @@ function createCharts() {
     formatter: (value) => formatCompact(Number(value))
   };
   charts.oi.binance = charts.oi.chart.addSeries(LineSeries, {
-    color: '#ffbc42',
+    color: CHART_STYLE.lineBinance,
     lineWidth: 1,
     priceFormat: oiFormat,
     lastValueVisible: false,
     priceLineVisible: false,
   });
   charts.oi.bybit = charts.oi.chart.addSeries(LineSeries, {
-    color: '#9a7cff',
+    color: CHART_STYLE.lineBybit,
     lineWidth: 1,
     priceScaleId: 'left',
     priceFormat: oiFormat,
@@ -798,7 +815,7 @@ function createCharts() {
     priceLineVisible: false,
   });
   charts.oi.agg = charts.oi.chart.addSeries(LineSeries, {
-    color: '#d7dde9',
+    color: CHART_STYLE.lineAgg,
     lineWidth: 2,
     priceFormat: oiFormat,
     lastValueVisible: false,
@@ -816,14 +833,14 @@ function createCharts() {
     formatter: (value) => formatPercentAxis(value, 4),
   };
   charts.funding.binance = charts.funding.chart.addSeries(LineSeries, {
-    color: '#ffbc42',
+    color: CHART_STYLE.lineBinance,
     lineWidth: 1,
     priceFormat: fundingFormat,
     lastValueVisible: false,
     priceLineVisible: false,
   });
   charts.funding.bybit = charts.funding.chart.addSeries(LineSeries, {
-    color: '#9a7cff',
+    color: CHART_STYLE.lineBybit,
     lineWidth: 1,
     priceFormat: fundingFormat,
     lastValueVisible: false,
@@ -1059,7 +1076,7 @@ async function loadCockpit() {
     charts.price.volume.setData(spotBars.map((bar) => ({
       time: bar.time,
       value: bar.volume,
-      color: bar.close >= bar.open ? 'rgba(25, 215, 157, 0.35)' : 'rgba(255, 97, 116, 0.35)'
+      color: bar.close >= bar.open ? CHART_STYLE.volBull : CHART_STYLE.volBear
     })));
     charts.price.binancePerp.setData((perp.bars || []).map((bar) => ({ time: bar.time, value: bar.close })));
     charts.price.bybitPerp.setData((bybit.bars || []).map((bar) => ({ time: bar.time, value: bar.close })));
