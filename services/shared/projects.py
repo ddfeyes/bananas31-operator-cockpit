@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -35,24 +37,17 @@ class ProjectConfig:
         )
 
 
-DEFAULT_PROJECT_ID = "bananas31"
+PROJECTS_CONFIG_PATH = Path(__file__).with_name("projects.json")
 
-PROJECTS: tuple[ProjectConfig, ...] = (
-    ProjectConfig(
-        id="bananas31",
-        label="BANANAS31",
-        symbol="BANANAS31USDT",
-        dex_network="bsc",
-        dex_pool_address="0x7f51bbf34156ba802deb0e38b7671dc4fa32041d",
-    ),
-    ProjectConfig(
-        id="dexe",
-        label="DEXE",
-        symbol="DEXEUSDT",
-        dex_network="bsc",
-        dex_pool_address="0x23ab35fac8a7ff11f0fe197df68e8ee52e415f2a",
-    ),
-)
+
+def load_projects_config() -> tuple[str, tuple[ProjectConfig, ...]]:
+    payload = json.loads(PROJECTS_CONFIG_PATH.read_text())
+    projects = tuple(ProjectConfig(**project) for project in payload["projects"])
+    default_project_id = payload.get("default_project_id") or (projects[0].id if projects else "")
+    return default_project_id, projects
+
+
+DEFAULT_PROJECT_ID, PROJECTS = load_projects_config()
 
 PROJECT_MAP = {project.id: project for project in PROJECTS}
 

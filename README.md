@@ -34,3 +34,14 @@ The first milestone is not a full migration of the old system. It is a clean bas
 - `docs/plans/2026-03-30-bananas31-operator-cockpit-design.md`
 - `docs/plans/2026-03-30-bananas31-operator-cockpit-implementation.md`
 
+## Project Registry
+
+Pairs exposed in the cockpit live in [services/shared/projects.json](services/shared/projects.json).
+
+Add another pair with:
+
+```bash
+python3 scripts/add_project.py --symbol DEXEUSDT --dex-network bsc --dex-pool-address 0x23ab35fac8a7ff11f0fe197df68e8ee52e415f2a
+```
+
+Then run the backfill workers for that project id to seed history.
