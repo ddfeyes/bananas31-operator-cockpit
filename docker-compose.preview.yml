@@ -32,4 +32,4 @@ services:
 volumes:
   aggdash-data:
     external: true
-    name: bananas31-dashboard-cockpit-preview_aggdash-data
+    name: bananas31-operator-cockpit-preview-aggdash-data-v2
