@@ -12,9 +12,10 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+for candidate in (Path(__file__).resolve().parents[2], Path(__file__).resolve().parents[1]):
+    candidate_str = str(candidate)
+    if candidate_str not in sys.path:
+        sys.path.insert(0, candidate_str)
 
 from services.shared.projects import PROJECTS, PROJECT_MAP, ProjectConfig
 from services.shared.schema import ensure_project_schema
