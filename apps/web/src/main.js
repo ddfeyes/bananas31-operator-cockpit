@@ -20,6 +20,7 @@ import {
 import { matchHotkeyAction, readStoredCockpitPrefs, resolveReplayNeighbor, writeStoredCockpitPrefs } from './lib/cockpitState.js';
 import { formatCompact, formatPercent, formatPrice, getPricePrecision } from './lib/formatters.js';
 import { DEFAULT_LAYOUT_STATE, readStoredLayoutState, rebalancePairWeights, writeStoredLayoutState } from './lib/layoutState.js';
+import { deriveMarketDiagnostics } from './lib/diagnostics.js';
 import {
   buildFocusMap,
   buildReplayRange,
@@ -238,6 +239,7 @@ const state = {
   replayEvent: null,
   replayEvents: [],
   payload: null,
+  diagnostics: null,
   healthLabel: 'Connecting',
   windowLabel: 'Waiting',
   loadRequestId: 0,
@@ -557,35 +559,6 @@ function coverageStatus(count) {
   return { label: 'Thin', tone: 'weak' };
 }
 
-function deriveSessionThesis(snapshot) {
-  const basis = snapshot.summary.basis_agg_pct ?? 0;
-  const funding = snapshot.summary.funding_avg_8h_pct ?? 0;
-  const oi = snapshot.summary.oi_total ?? 0;
-  const items = [];
-
-  if (basis < 0) {
-    items.push({ label: 'Carry spread', state: 'Defensive', value: formatPercent(basis, 2) });
-  } else {
-    items.push({ label: 'Carry spread', state: 'Engaged', value: formatPercent(basis, 2) });
-  }
-
-  if (funding > 0.05) {
-    items.push({ label: 'Funding pressure', state: 'Hot', value: formatPercent(funding, 4) });
-  } else if (funding < 0) {
-    items.push({ label: 'Funding pressure', state: 'Negative', value: 'Squeeze' });
-  } else {
-    items.push({ label: 'Funding pressure', state: 'Calm', value: formatPercent(funding, 4) });
-  }
-
-  if (oi >= 7_500_000_000) {
-    items.push({ label: 'Perp positioning', state: 'Heavy', value: formatCompact(oi) });
-  } else {
-    items.push({ label: 'Perp positioning', state: 'Moderate', value: formatCompact(oi) });
-  }
-
-  return items;
-}
-
 function updateStatusHeadline() {
   syncState.textContent = `${pickReplayModeLabel(state.replayEvent, state.focusMode)} · ${state.windowLabel} · ${state.healthLabel}`;
   replayIndicatorButton.textContent = state.replayEvent
@@ -595,7 +568,7 @@ function updateStatusHeadline() {
   liveResetButton.classList.toggle('active', !state.replayEvent);
 }
 
-function renderSummary(snapshot) {
+function renderSummary(snapshot, diagnostics) {
   const activeProject = snapshot.project || getActiveProject();
   const hasDex = activeProject?.has_dex !== false;
   brandKicker.textContent = activeProject?.label || 'PROJECT';
@@ -618,19 +591,21 @@ function renderSummary(snapshot) {
     </article>
   `).join('');
 
-  const regime = snapshot.summary.basis_agg_pct >= 0 ? 'Carry On' : 'Defensive';
-  liveRegime.textContent = regime;
+  liveRegime.textContent = diagnostics?.regime || (snapshot.summary.basis_agg_pct >= 0 ? 'Carry On' : 'Defensive');
   sessionRange.textContent = `${formatPrice(snapshot.summary.low_24h)} → ${formatPrice(snapshot.summary.high_24h)}`;
+}
 
-  thesisList.innerHTML = deriveSessionThesis(snapshot)
-    .map(({ label, state: thesisState, value }) => `
-      <li>
+function renderDiagnostics(diagnostics) {
+  thesisList.innerHTML = (diagnostics?.items || []).map(({ label, state: thesisState, value, detail }) => `
+    <li>
+      <div class="thesis-row">
         <span class="thesis-key">${label}</span>
         <span class="thesis-state">${thesisState}</span>
         <span class="thesis-value">${value}</span>
-      </li>
-    `)
-    .join('');
+      </div>
+      <div class="thesis-detail">${detail || ''}</div>
+    </li>
+  `).join('');
 }
 
 function renderCoverage(data) {
@@ -1048,7 +1023,10 @@ async function loadCockpit() {
       state.replayEvent = state.replayEvents.find((event) => event.id === state.replayEvent.id) || null;
     }
 
-    renderSummary(snapshot);
+    const diagnostics = deriveMarketDiagnostics(payload, interval);
+    state.diagnostics = diagnostics;
+    renderSummary(snapshot, diagnostics);
+    renderDiagnostics(diagnostics);
     renderCoverage(payload);
     renderReplayEvents(state.replayEvents);
     updatePanelMeta(payload);
