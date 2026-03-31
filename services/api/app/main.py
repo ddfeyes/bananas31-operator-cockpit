@@ -16,8 +16,10 @@ from .db import (
     fetch_latest_snapshot,
     fetch_ohlcv_series,
     fetch_oi_series,
+    fetch_projects_metadata,
     fetch_replay_events,
 )
+from services.shared.projects import DEFAULT_PROJECT_ID
 
 
 def mount_web_app(app: FastAPI, web_dist: Path) -> None:
@@ -43,7 +45,7 @@ def mount_web_app(app: FastAPI, web_dist: Path) -> None:
 
 
 def create_app(database: Database | None = None) -> FastAPI:
-    app = FastAPI(title="BANANAS31 Operator API", version="0.1.0")
+    app = FastAPI(title="Operator API", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -58,53 +60,63 @@ def create_app(database: Database | None = None) -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/api/projects")
+    def projects() -> dict:
+        return fetch_projects_metadata()
+
     @app.get("/api/snapshot")
-    def snapshot() -> dict:
-        return fetch_latest_snapshot(db)
+    def snapshot(project_id: str = Query(DEFAULT_PROJECT_ID)) -> dict:
+        return fetch_latest_snapshot(db, project_id)
 
     @app.get("/api/history/ohlcv")
     def history_ohlcv(
+        project_id: str = Query(DEFAULT_PROJECT_ID),
         exchange_id: str = Query(...),
         minutes: int = Query(43200, ge=60),
         interval: str = Query("4h"),
     ) -> dict:
-        return fetch_ohlcv_series(db, exchange_id, minutes, interval)
+        return fetch_ohlcv_series(db, exchange_id, minutes, interval, project_id)
 
     @app.get("/api/history/dex")
     def history_dex(
+        project_id: str = Query(DEFAULT_PROJECT_ID),
         minutes: int = Query(43200, ge=60),
         interval: str = Query("4h"),
     ) -> dict:
-        return fetch_dex_series(db, minutes, interval)
+        return fetch_dex_series(db, minutes, interval, project_id)
 
     @app.get("/api/history/basis")
     def history_basis(
+        project_id: str = Query(DEFAULT_PROJECT_ID),
         window_secs: int = Query(86400 * 30, ge=3600),
         interval: str = Query("4h"),
     ) -> dict:
-        return fetch_basis_series(db, window_secs, interval)
+        return fetch_basis_series(db, window_secs, interval, project_id)
 
     @app.get("/api/history/oi")
     def history_oi(
+        project_id: str = Query(DEFAULT_PROJECT_ID),
         minutes: int = Query(43200, ge=60),
         interval: str = Query("4h"),
     ) -> dict:
-        return fetch_oi_series(db, minutes, interval)
+        return fetch_oi_series(db, minutes, interval, project_id)
 
     @app.get("/api/history/funding")
     def history_funding(
+        project_id: str = Query(DEFAULT_PROJECT_ID),
         window_secs: int = Query(86400 * 30, ge=3600),
         interval_secs: int = Query(14400, ge=60),
     ) -> dict:
-        return fetch_funding_series(db, window_secs, interval_secs)
+        return fetch_funding_series(db, window_secs, interval_secs, project_id)
 
     @app.get("/api/replay/events")
     def replay_events(
+        project_id: str = Query(DEFAULT_PROJECT_ID),
         window_secs: int = Query(86400 * 30, ge=3600),
         interval: str = Query("4h"),
         limit: int = Query(6, ge=1, le=24),
     ) -> dict:
-        return fetch_replay_events(db, window_secs, interval, limit)
+        return fetch_replay_events(db, window_secs, interval, limit, project_id)
 
     mount_web_app(app, WEB_DIST)
     return app

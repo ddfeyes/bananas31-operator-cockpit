@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.db import Database
 from app.main import create_app
+from services.shared.schema import ensure_project_schema
 
 
 DDL = """
@@ -89,6 +90,22 @@ def seed_database(path: Path) -> None:
         conn.close()
 
 
+def add_second_project(path: Path) -> None:
+    conn = sqlite3.connect(path)
+    try:
+        ensure_project_schema(conn)
+        conn.execute(
+            """
+            INSERT INTO price_feed(project_id, exchange_id, timestamp, open, high, low, close, volume)
+            VALUES(?,?,?,?,?,?,?,?)
+            """,
+            ("dexe", "binance-spot", int(time.time()), 7.8, 8.0, 7.7, 7.9, 1000.0),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def test_history_endpoints_return_expected_shapes(tmp_path: Path) -> None:
     db_path = tmp_path / "fixture.db"
     seed_database(db_path)
@@ -102,6 +119,7 @@ def test_history_endpoints_return_expected_shapes(tmp_path: Path) -> None:
     assert snapshot["prices"]["dex"] == 1.19
     assert snapshot["summary"]["oi_total"] == 1_810_000.0
     assert snapshot["summary"]["funding_avg_8h_pct"] == 0.06
+    assert snapshot["project"]["id"] == "bananas31"
 
     ohlcv = client.get("/api/history/ohlcv", params={"exchange_id": "binance-spot", "minutes": 10_000_000, "interval": "1h"}).json()
     assert ohlcv["count"] == 2
@@ -124,3 +142,22 @@ def test_history_endpoints_return_expected_shapes(tmp_path: Path) -> None:
     funding = client.get("/api/history/funding", params={"window_secs": 10_000_000, "interval_secs": 3600}).json()
     assert len(funding["per_source"]["binance-perp"]) == 2
     assert funding["per_source"]["binance-perp"][-1]["rate_8h"] == 0.0004
+
+
+def test_project_scoped_endpoints_and_catalog(tmp_path: Path) -> None:
+    db_path = tmp_path / "fixture.db"
+    seed_database(db_path)
+
+    client = TestClient(create_app(Database(str(db_path))))
+    add_second_project(db_path)
+
+    projects = client.get("/api/projects").json()
+    assert projects["default_project_id"] == "bananas31"
+    assert {project["id"] for project in projects["projects"]} >= {"bananas31", "dexe"}
+
+    dexe_snapshot = client.get("/api/snapshot", params={"project_id": "dexe"}).json()
+    assert dexe_snapshot["project"]["id"] == "dexe"
+    assert dexe_snapshot["prices"]["binance-spot"] == 7.9
+
+    bananas_snapshot = client.get("/api/snapshot", params={"project_id": "bananas31"}).json()
+    assert bananas_snapshot["prices"]["binance-spot"] == 1.2

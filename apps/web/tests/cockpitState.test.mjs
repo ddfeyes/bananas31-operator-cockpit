@@ -16,6 +16,7 @@ test('readStoredCockpitPrefs returns sane defaults', () => {
   };
 
   assert.deepEqual(readStoredCockpitPrefs(storage), {
+    projectId: 'bananas31',
     interval: '4h',
     focusMode: 'all'
   });
@@ -32,26 +33,30 @@ test('writeStoredCockpitPrefs persists only valid values', () => {
     }
   };
 
-  writeStoredCockpitPrefs(storage, { interval: '1d', focusMode: 'basis' });
+  writeStoredCockpitPrefs(storage, { projectId: 'dexe', interval: '1d', focusMode: 'basis' });
   assert.deepEqual(readStoredCockpitPrefs(storage), {
+    projectId: 'dexe',
     interval: '1d',
     focusMode: 'basis'
   });
 
-  writeStoredCockpitPrefs(storage, { interval: '1m', focusMode: 'all' });
+  writeStoredCockpitPrefs(storage, { projectId: 'bananas31', interval: '1m', focusMode: 'all' });
   assert.deepEqual(readStoredCockpitPrefs(storage), {
+    projectId: 'bananas31',
     interval: '1m',
     focusMode: 'all'
   });
 
-  writeStoredCockpitPrefs(storage, { interval: '30m', focusMode: 'funding' });
+  writeStoredCockpitPrefs(storage, { projectId: 'dexe', interval: '30m', focusMode: 'funding' });
   assert.deepEqual(readStoredCockpitPrefs(storage), {
+    projectId: 'dexe',
     interval: '30m',
     focusMode: 'funding'
   });
 
-  writeStoredCockpitPrefs(storage, { interval: '15m', focusMode: 'weird' });
+  writeStoredCockpitPrefs(storage, { projectId: '', interval: '15m', focusMode: 'weird' });
   assert.deepEqual(readStoredCockpitPrefs(storage), {
+    projectId: 'bananas31',
     interval: '4h',
     focusMode: 'all'
   });

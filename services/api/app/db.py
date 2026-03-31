@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from .config import DB_PATH
+from services.shared.projects import DEFAULT_PROJECT_ID, get_project, list_projects
+from services.shared.schema import ensure_project_schema
 
 
 INTERVAL_TO_SECONDS = {
@@ -29,6 +31,7 @@ class Database:
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, check_same_thread=False)
         connection.row_factory = sqlite3.Row
+        ensure_project_schema(connection)
         return connection
 
 
@@ -93,25 +96,42 @@ def resample_funding(rows: list[sqlite3.Row], interval_secs: int) -> list[dict[s
     return [buckets[key] for key in sorted(buckets)]
 
 
-def fetch_latest_snapshot(database: Database) -> dict[str, Any]:
+def fetch_projects_metadata() -> dict[str, Any]:
+    return {
+        "default_project_id": DEFAULT_PROJECT_ID,
+        "projects": list_projects(),
+    }
+
+
+def fetch_latest_snapshot(database: Database, project_id: str = DEFAULT_PROJECT_ID) -> dict[str, Any]:
+    project = get_project(project_id)
     with closing(database.connect()) as connection:
         now = time.time()
         prices = {}
         for source in ("binance-spot", "binance-perp", "bybit-perp"):
             row = connection.execute(
-                "SELECT close FROM price_feed WHERE exchange_id=? ORDER BY timestamp DESC LIMIT 1",
-                (source,),
+                """
+                SELECT close FROM price_feed
+                WHERE project_id=? AND exchange_id=?
+                ORDER BY timestamp DESC LIMIT 1
+                """,
+                (project.id, source),
             ).fetchone()
             prices[source] = row["close"] if row else None
 
         dex_row = connection.execute(
-            "SELECT price FROM dex_price ORDER BY timestamp DESC LIMIT 1"
+            "SELECT price FROM dex_price WHERE project_id=? ORDER BY timestamp DESC LIMIT 1",
+            (project.id,),
         ).fetchone()
         prices["dex"] = dex_row["price"] if dex_row else None
 
         high_low = connection.execute(
-            "SELECT MAX(high) AS high_24h, MIN(low) AS low_24h FROM price_feed WHERE exchange_id='binance-spot' AND timestamp >= ?",
-            (now - 86400,),
+            """
+            SELECT MAX(high) AS high_24h, MIN(low) AS low_24h
+            FROM price_feed
+            WHERE project_id=? AND exchange_id='binance-spot' AND timestamp >= ?
+            """,
+            (project.id, now - 86400),
         ).fetchone()
         funding_rows = connection.execute(
             """
@@ -122,10 +142,11 @@ def fetch_latest_snapshot(database: Database) -> dict[str, Any]:
                     rate_8h,
                     ROW_NUMBER() OVER (PARTITION BY exchange_id ORDER BY timestamp DESC) AS row_number
                 FROM funding_rates
-                WHERE rate_8h IS NOT NULL
+                WHERE project_id=? AND rate_8h IS NOT NULL
             ) ranked
             WHERE ranked.row_number = 1
-            """
+            """,
+            (project.id,),
         ).fetchall()
         oi_rows = connection.execute(
             """
@@ -136,13 +157,14 @@ def fetch_latest_snapshot(database: Database) -> dict[str, Any]:
                     open_interest,
                     ROW_NUMBER() OVER (PARTITION BY exchange_id ORDER BY timestamp DESC) AS row_number
                 FROM oi
-                WHERE open_interest IS NOT NULL AND open_interest > 0
+                WHERE project_id=? AND open_interest IS NOT NULL AND open_interest > 0
             ) ranked
             WHERE ranked.row_number = 1
-            """
+            """,
+            (project.id,),
         ).fetchall()
 
-        basis = fetch_basis_series(database, 86400 * 2, "4h")
+        basis = fetch_basis_series(database, 86400 * 2, "4h", project.id)
         agg_basis = basis["aggregated"][-1]["value"] if basis["aggregated"] else None
         avg_funding = None
         if funding_rows:
@@ -150,6 +172,12 @@ def fetch_latest_snapshot(database: Database) -> dict[str, Any]:
             avg_funding = sum(values) / len(values)
 
         return {
+            "project": {
+                "id": project.id,
+                "label": project.label,
+                "symbol": project.symbol,
+                "has_dex": project.has_dex,
+            },
             "prices": prices,
             "summary": {
                 "basis_agg_pct": agg_basis,
@@ -161,15 +189,27 @@ def fetch_latest_snapshot(database: Database) -> dict[str, Any]:
         }
 
 
-def fetch_ohlcv_series(database: Database, exchange_id: str, minutes: int, interval: str) -> dict[str, Any]:
+def fetch_ohlcv_series(
+    database: Database,
+    exchange_id: str,
+    minutes: int,
+    interval: str,
+    project_id: str = DEFAULT_PROJECT_ID,
+) -> dict[str, Any]:
     start_ts = time.time() - minutes * 60
     with closing(database.connect()) as connection:
         rows = connection.execute(
-            "SELECT timestamp, open, high, low, close, volume FROM price_feed WHERE exchange_id=? AND timestamp >= ? ORDER BY timestamp ASC",
-            (exchange_id, start_ts),
+            """
+            SELECT timestamp, open, high, low, close, volume
+            FROM price_feed
+            WHERE project_id=? AND exchange_id=? AND timestamp >= ?
+            ORDER BY timestamp ASC
+            """,
+            (project_id, exchange_id, start_ts),
         ).fetchall()
     bars = resample_ohlcv(rows, interval)
     return {
+        "project_id": project_id,
         "exchange_id": exchange_id,
         "interval": interval,
         "count": len(bars),
@@ -177,15 +217,21 @@ def fetch_ohlcv_series(database: Database, exchange_id: str, minutes: int, inter
     }
 
 
-def fetch_dex_series(database: Database, minutes: int, interval: str) -> dict[str, Any]:
+def fetch_dex_series(database: Database, minutes: int, interval: str, project_id: str = DEFAULT_PROJECT_ID) -> dict[str, Any]:
     start_ts = time.time() - minutes * 60
     with closing(database.connect()) as connection:
         rows = connection.execute(
-            "SELECT timestamp, price FROM dex_price WHERE timestamp >= ? ORDER BY timestamp ASC",
-            (start_ts,),
+            """
+            SELECT timestamp, price
+            FROM dex_price
+            WHERE project_id=? AND timestamp >= ?
+            ORDER BY timestamp ASC
+            """,
+            (project_id, start_ts),
         ).fetchall()
     bars = resample_last_value(rows, interval, "price")
     return {
+        "project_id": project_id,
         "source": "bsc-pancakeswap",
         "interval": interval,
         "count": len(bars),
@@ -193,21 +239,38 @@ def fetch_dex_series(database: Database, minutes: int, interval: str) -> dict[st
     }
 
 
-def fetch_basis_series(database: Database, window_secs: int, interval: str) -> dict[str, Any]:
+def fetch_basis_series(
+    database: Database,
+    window_secs: int,
+    interval: str,
+    project_id: str = DEFAULT_PROJECT_ID,
+) -> dict[str, Any]:
     start_ts = time.time() - window_secs
     with closing(database.connect()) as connection:
         sources = {
             "spot": connection.execute(
-                "SELECT timestamp, close FROM price_feed WHERE exchange_id='binance-spot' AND timestamp >= ? ORDER BY timestamp ASC",
-                (start_ts,),
+                """
+                SELECT timestamp, close FROM price_feed
+                WHERE project_id=? AND exchange_id='binance-spot' AND timestamp >= ?
+                ORDER BY timestamp ASC
+                """,
+                (project_id, start_ts),
             ).fetchall(),
             "binance": connection.execute(
-                "SELECT timestamp, close FROM price_feed WHERE exchange_id='binance-perp' AND timestamp >= ? ORDER BY timestamp ASC",
-                (start_ts,),
+                """
+                SELECT timestamp, close FROM price_feed
+                WHERE project_id=? AND exchange_id='binance-perp' AND timestamp >= ?
+                ORDER BY timestamp ASC
+                """,
+                (project_id, start_ts),
             ).fetchall(),
             "bybit": connection.execute(
-                "SELECT timestamp, close FROM price_feed WHERE exchange_id='bybit-perp' AND timestamp >= ? ORDER BY timestamp ASC",
-                (start_ts,),
+                """
+                SELECT timestamp, close FROM price_feed
+                WHERE project_id=? AND exchange_id='bybit-perp' AND timestamp >= ?
+                ORDER BY timestamp ASC
+                """,
+                (project_id, start_ts),
             ).fetchall(),
         }
 
@@ -232,6 +295,7 @@ def fetch_basis_series(database: Database, window_secs: int, interval: str) -> d
 
     aggregated = [{"time": key, "value": sum(values) / len(values)} for key, values in sorted(aggregated_map.items())]
     return {
+        "project_id": project_id,
         "window_secs": window_secs,
         "interval_secs": INTERVAL_TO_SECONDS.get(interval, 14400),
         "per_exchange": per_exchange,
@@ -239,12 +303,17 @@ def fetch_basis_series(database: Database, window_secs: int, interval: str) -> d
     }
 
 
-def fetch_oi_series(database: Database, minutes: int, interval: str) -> dict[str, Any]:
+def fetch_oi_series(database: Database, minutes: int, interval: str, project_id: str = DEFAULT_PROJECT_ID) -> dict[str, Any]:
     start_ts = time.time() - minutes * 60
     with closing(database.connect()) as connection:
         rows = connection.execute(
-            "SELECT exchange_id, timestamp, open_interest FROM oi WHERE timestamp >= ? ORDER BY timestamp ASC",
-            (start_ts,),
+            """
+            SELECT exchange_id, timestamp, open_interest
+            FROM oi
+            WHERE project_id=? AND timestamp >= ?
+            ORDER BY timestamp ASC
+            """,
+            (project_id, start_ts),
         ).fetchall()
 
     grouped: dict[str, list[sqlite3.Row]] = defaultdict(list)
@@ -291,17 +360,28 @@ def fetch_oi_series(database: Database, minutes: int, interval: str) -> dict[str
             aggregated.append({"time": bucket, "value": total})
 
     return {
+        "project_id": project_id,
         "per_source": per_source,
         "aggregated": aggregated,
     }
 
 
-def fetch_funding_series(database: Database, window_secs: int, interval_secs: int) -> dict[str, Any]:
+def fetch_funding_series(
+    database: Database,
+    window_secs: int,
+    interval_secs: int,
+    project_id: str = DEFAULT_PROJECT_ID,
+) -> dict[str, Any]:
     start_ts = time.time() - window_secs
     with closing(database.connect()) as connection:
         rows = connection.execute(
-            "SELECT exchange_id, timestamp, rate_8h, rate_1h FROM funding_rates WHERE timestamp >= ? ORDER BY timestamp ASC",
-            (start_ts,),
+            """
+            SELECT exchange_id, timestamp, rate_8h, rate_1h
+            FROM funding_rates
+            WHERE project_id=? AND timestamp >= ?
+            ORDER BY timestamp ASC
+            """,
+            (project_id, start_ts),
         ).fetchall()
 
     grouped: dict[str, list[sqlite3.Row]] = defaultdict(list)
@@ -309,6 +389,7 @@ def fetch_funding_series(database: Database, window_secs: int, interval_secs: in
         grouped[row["exchange_id"]].append(row)
 
     return {
+        "project_id": project_id,
         "window_secs": window_secs,
         "interval_secs": interval_secs,
         "per_source": {
@@ -318,11 +399,17 @@ def fetch_funding_series(database: Database, window_secs: int, interval_secs: in
     }
 
 
-def fetch_replay_events(database: Database, window_secs: int, interval: str, limit: int = 6) -> dict[str, Any]:
+def fetch_replay_events(
+    database: Database,
+    window_secs: int,
+    interval: str,
+    limit: int = 6,
+    project_id: str = DEFAULT_PROJECT_ID,
+) -> dict[str, Any]:
     interval_secs = INTERVAL_TO_SECONDS.get(interval, 14400)
-    basis = fetch_basis_series(database, window_secs, interval)
-    oi = fetch_oi_series(database, max(60, window_secs // 60), interval)
-    funding = fetch_funding_series(database, window_secs, interval_secs)
+    basis = fetch_basis_series(database, window_secs, interval, project_id)
+    oi = fetch_oi_series(database, max(60, window_secs // 60), interval, project_id)
+    funding = fetch_funding_series(database, window_secs, interval_secs, project_id)
 
     oi_points = oi["aggregated"]
     oi_map = {point["time"]: point["value"] for point in oi_points}
@@ -403,6 +490,7 @@ def fetch_replay_events(database: Database, window_secs: int, interval: str, lim
     ranked.sort(key=lambda event: event["time"], reverse=True)
 
     return {
+        "project_id": project_id,
         "window_secs": window_secs,
         "interval": interval,
         "interval_secs": interval_secs,

@@ -3,15 +3,22 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import sys
 import time
 import urllib.parse
 import urllib.request
 from contextlib import closing
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-SYMBOL = "BANANAS31USDT"
-USER_AGENT = "bananas31-operator-cockpit-minute-poller/1.0"
+from services.shared.projects import PROJECTS, ProjectConfig
+from services.shared.schema import ensure_project_schema
+
+
+USER_AGENT = "bananas31-operator-cockpit-minute-poller/2.0"
 
 BINANCE_SPOT_KLINES = "https://api.binance.com/api/v3/klines"
 BINANCE_PERP_KLINES = "https://fapi.binance.com/fapi/v1/klines"
@@ -19,10 +26,6 @@ BINANCE_OPEN_INTEREST = "https://fapi.binance.com/fapi/v1/openInterest"
 BINANCE_PREMIUM_INDEX = "https://fapi.binance.com/fapi/v1/premiumIndex"
 BYBIT_KLINES = "https://api.bybit.com/v5/market/kline"
 BYBIT_TICKERS = "https://api.bybit.com/v5/market/tickers"
-
-PANCAKE_POOL = "0x7f51bbf34156ba802deb0e38b7671dc4fa32041d"
-DEXSCREENER_PAIR_URL = f"https://api.dexscreener.com/latest/dex/pairs/bsc/{PANCAKE_POOL}"
-GECKOTERMINAL_POOL_URL = f"https://api.geckoterminal.com/api/v2/networks/bsc/pools/{PANCAKE_POOL}"
 
 
 def fetch_json(url: str, params: dict[str, object] | None = None) -> object:
@@ -33,57 +36,6 @@ def fetch_json(url: str, params: dict[str, object] | None = None) -> object:
         return json.loads(response.read().decode())
 
 
-def ensure_schema(connection: sqlite3.Connection) -> None:
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS price_feed (
-            exchange_id TEXT NOT NULL,
-            timestamp REAL NOT NULL,
-            open REAL,
-            high REAL,
-            low REAL,
-            close REAL,
-            volume REAL
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS oi (
-            exchange_id TEXT NOT NULL,
-            timestamp REAL NOT NULL,
-            open_interest REAL,
-            funding_rate REAL
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS funding_rates (
-            exchange_id TEXT NOT NULL,
-            timestamp REAL NOT NULL,
-            rate_8h REAL,
-            rate_1h REAL
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS dex_price (
-            timestamp REAL NOT NULL,
-            price REAL,
-            liquidity REAL,
-            deviation_pct REAL
-        )
-        """
-    )
-    connection.execute("CREATE INDEX IF NOT EXISTS idx_price_feed_exchange_ts ON price_feed(exchange_id, timestamp)")
-    connection.execute("CREATE INDEX IF NOT EXISTS idx_oi_exchange_ts ON oi(exchange_id, timestamp)")
-    connection.execute("CREATE INDEX IF NOT EXISTS idx_funding_exchange_ts ON funding_rates(exchange_id, timestamp)")
-    connection.execute("CREATE INDEX IF NOT EXISTS idx_dex_price_ts ON dex_price(timestamp)")
-    connection.commit()
-
-
 def minute_bucket(timestamp: float | None = None) -> int:
     numeric = time.time() if timestamp is None else timestamp
     return int(numeric // 60 * 60)
@@ -91,6 +43,7 @@ def minute_bucket(timestamp: float | None = None) -> int:
 
 def upsert_price_row(
     connection: sqlite3.Connection,
+    project_id: str,
     exchange_id: str,
     timestamp: int,
     open_: float,
@@ -100,8 +53,12 @@ def upsert_price_row(
     volume: float,
 ) -> None:
     existing = connection.execute(
-        "SELECT rowid FROM price_feed WHERE exchange_id=? AND timestamp=? LIMIT 1",
-        (exchange_id, timestamp),
+        """
+        SELECT rowid FROM price_feed
+        WHERE project_id=? AND exchange_id=? AND timestamp=?
+        LIMIT 1
+        """,
+        (project_id, exchange_id, timestamp),
     ).fetchone()
     if existing:
         connection.execute(
@@ -115,37 +72,52 @@ def upsert_price_row(
         return
     connection.execute(
         """
-        INSERT INTO price_feed(exchange_id, timestamp, open, high, low, close, volume)
-        VALUES(?,?,?,?,?,?,?)
+        INSERT INTO price_feed(project_id, exchange_id, timestamp, open, high, low, close, volume)
+        VALUES(?,?,?,?,?,?,?,?)
         """,
-        (exchange_id, timestamp, open_, high, low, close, volume),
+        (project_id, exchange_id, timestamp, open_, high, low, close, volume),
     )
 
 
-def upsert_oi_row(connection: sqlite3.Connection, exchange_id: str, timestamp: int, open_interest: float) -> None:
+def upsert_oi_row(
+    connection: sqlite3.Connection,
+    project_id: str,
+    exchange_id: str,
+    timestamp: int,
+    open_interest: float,
+) -> None:
     existing = connection.execute(
-        "SELECT rowid FROM oi WHERE exchange_id=? AND timestamp=? LIMIT 1",
-        (exchange_id, timestamp),
+        """
+        SELECT rowid FROM oi
+        WHERE project_id=? AND exchange_id=? AND timestamp=?
+        LIMIT 1
+        """,
+        (project_id, exchange_id, timestamp),
     ).fetchone()
     if existing:
         connection.execute("UPDATE oi SET open_interest=? WHERE rowid=?", (open_interest, existing[0]))
         return
     connection.execute(
-        "INSERT INTO oi(exchange_id, timestamp, open_interest) VALUES(?,?,?)",
-        (exchange_id, timestamp, open_interest),
+        "INSERT INTO oi(project_id, exchange_id, timestamp, open_interest) VALUES(?,?,?,?)",
+        (project_id, exchange_id, timestamp, open_interest),
     )
 
 
 def upsert_funding_row(
     connection: sqlite3.Connection,
+    project_id: str,
     exchange_id: str,
     timestamp: int,
     rate_8h: float,
     rate_1h: float,
 ) -> None:
     existing = connection.execute(
-        "SELECT rowid FROM funding_rates WHERE exchange_id=? AND timestamp=? LIMIT 1",
-        (exchange_id, timestamp),
+        """
+        SELECT rowid FROM funding_rates
+        WHERE project_id=? AND exchange_id=? AND timestamp=?
+        LIMIT 1
+        """,
+        (project_id, exchange_id, timestamp),
     ).fetchone()
     if existing:
         connection.execute(
@@ -154,21 +126,25 @@ def upsert_funding_row(
         )
         return
     connection.execute(
-        "INSERT INTO funding_rates(exchange_id, timestamp, rate_8h, rate_1h) VALUES(?,?,?,?)",
-        (exchange_id, timestamp, rate_8h, rate_1h),
+        """
+        INSERT INTO funding_rates(project_id, exchange_id, timestamp, rate_8h, rate_1h)
+        VALUES(?,?,?,?,?)
+        """,
+        (project_id, exchange_id, timestamp, rate_8h, rate_1h),
     )
 
 
 def upsert_dex_row(
     connection: sqlite3.Connection,
+    project_id: str,
     timestamp: int,
     price: float,
     liquidity: float | None,
     deviation_pct: float | None,
 ) -> None:
     existing = connection.execute(
-        "SELECT rowid FROM dex_price WHERE timestamp=? LIMIT 1",
-        (timestamp,),
+        "SELECT rowid FROM dex_price WHERE project_id=? AND timestamp=? LIMIT 1",
+        (project_id, timestamp),
     ).fetchone()
     if existing:
         connection.execute(
@@ -177,8 +153,8 @@ def upsert_dex_row(
         )
         return
     connection.execute(
-        "INSERT INTO dex_price(timestamp, price, liquidity, deviation_pct) VALUES(?,?,?,?)",
-        (timestamp, price, liquidity, deviation_pct),
+        "INSERT INTO dex_price(project_id, timestamp, price, liquidity, deviation_pct) VALUES(?,?,?,?,?)",
+        (project_id, timestamp, price, liquidity, deviation_pct),
     )
 
 
@@ -212,17 +188,17 @@ def pick_closed_bybit_kline(rows: list[list[str]], now_ts: float) -> tuple[int, 
     return None
 
 
-def fetch_latest_binance_kline(url: str, now_ts: float) -> tuple[int, float, float, float, float, float] | None:
-    rows = fetch_json(url, {"symbol": SYMBOL, "interval": "1m", "limit": 3})
+def fetch_latest_binance_kline(url: str, symbol: str, now_ts: float) -> tuple[int, float, float, float, float, float] | None:
+    rows = fetch_json(url, {"symbol": symbol, "interval": "1m", "limit": 3})
     if not isinstance(rows, list) or not rows:
         return None
     return pick_closed_binance_kline(rows, now_ts)
 
 
-def fetch_latest_bybit_kline(now_ts: float) -> tuple[int, float, float, float, float, float] | None:
+def fetch_latest_bybit_kline(symbol: str, now_ts: float) -> tuple[int, float, float, float, float, float] | None:
     payload = fetch_json(
         BYBIT_KLINES,
-        {"category": "linear", "symbol": SYMBOL, "interval": "1", "limit": 3},
+        {"category": "linear", "symbol": symbol, "interval": "1", "limit": 3},
     )
     rows = payload.get("result", {}).get("list", []) if isinstance(payload, dict) else []
     if not rows:
@@ -230,20 +206,20 @@ def fetch_latest_bybit_kline(now_ts: float) -> tuple[int, float, float, float, f
     return pick_closed_bybit_kline(list(reversed(rows)), now_ts)
 
 
-def fetch_latest_binance_oi() -> float | None:
-    payload = fetch_json(BINANCE_OPEN_INTEREST, {"symbol": SYMBOL})
+def fetch_latest_binance_oi(symbol: str) -> float | None:
+    payload = fetch_json(BINANCE_OPEN_INTEREST, {"symbol": symbol})
     value = payload.get("openInterest") if isinstance(payload, dict) else None
     return float(value) if value is not None else None
 
 
-def fetch_latest_binance_funding() -> float | None:
-    payload = fetch_json(BINANCE_PREMIUM_INDEX, {"symbol": SYMBOL})
+def fetch_latest_binance_funding(symbol: str) -> float | None:
+    payload = fetch_json(BINANCE_PREMIUM_INDEX, {"symbol": symbol})
     value = payload.get("lastFundingRate") if isinstance(payload, dict) else None
     return float(value) if value is not None else None
 
 
-def fetch_latest_bybit_market_state() -> tuple[float | None, float | None]:
-    payload = fetch_json(BYBIT_TICKERS, {"category": "linear", "symbol": SYMBOL})
+def fetch_latest_bybit_market_state(symbol: str) -> tuple[float | None, float | None]:
+    payload = fetch_json(BYBIT_TICKERS, {"category": "linear", "symbol": symbol})
     rows = payload.get("result", {}).get("list", []) if isinstance(payload, dict) else []
     if not rows:
         return None, None
@@ -253,99 +229,121 @@ def fetch_latest_bybit_market_state() -> tuple[float | None, float | None]:
     return oi, funding
 
 
-def fetch_dex_snapshot() -> tuple[float | None, float | None]:
-    try:
-        payload = fetch_json(DEXSCREENER_PAIR_URL)
-        pairs = payload.get("pairs", []) if isinstance(payload, dict) else []
-        if pairs:
-            pair = pairs[0]
-            price = pair.get("priceUsd")
-            liquidity = pair.get("liquidity", {}).get("usd")
+def fetch_dex_snapshot(project: ProjectConfig) -> tuple[float | None, float | None]:
+    if not project.has_dex:
+        return None, None
+
+    if project.dexscreener_pair_url:
+        try:
+            payload = fetch_json(project.dexscreener_pair_url)
+            pairs = payload.get("pairs", []) if isinstance(payload, dict) else []
+            if pairs:
+                pair = pairs[0]
+                price = pair.get("priceUsd")
+                liquidity = pair.get("liquidity", {}).get("usd")
+                if price is not None:
+                    return float(price), float(liquidity) if liquidity is not None else None
+        except Exception:
+            pass
+
+    if project.geckoterminal_pool_url:
+        try:
+            payload = fetch_json(project.geckoterminal_pool_url)
+            attributes = payload.get("data", {}).get("attributes", {}) if isinstance(payload, dict) else {}
+            price = attributes.get("base_token_price_usd")
+            liquidity = attributes.get("reserve_in_usd") or attributes.get("market_cap_usd")
             if price is not None:
                 return float(price), float(liquidity) if liquidity is not None else None
-    except Exception:
-        pass
-
-    try:
-        payload = fetch_json(GECKOTERMINAL_POOL_URL)
-        attributes = payload.get("data", {}).get("attributes", {}) if isinstance(payload, dict) else {}
-        price = attributes.get("base_token_price_usd")
-        liquidity = attributes.get("reserve_in_usd") or attributes.get("market_cap_usd")
-        if price is not None:
-            return float(price), float(liquidity) if liquidity is not None else None
-    except Exception:
-        pass
+        except Exception:
+            pass
 
     return None, None
 
 
-def fetch_latest_prices(now_ts: float) -> dict[str, tuple[int, float, float, float, float, float] | None]:
+def fetch_latest_prices(project: ProjectConfig, now_ts: float) -> dict[str, tuple[int, float, float, float, float, float] | None]:
     return {
-        "binance-spot": fetch_latest_binance_kline(BINANCE_SPOT_KLINES, now_ts),
-        "binance-perp": fetch_latest_binance_kline(BINANCE_PERP_KLINES, now_ts),
-        "bybit-perp": fetch_latest_bybit_kline(now_ts),
+        "binance-spot": fetch_latest_binance_kline(BINANCE_SPOT_KLINES, project.symbol, now_ts),
+        "binance-perp": fetch_latest_binance_kline(BINANCE_PERP_KLINES, project.symbol, now_ts),
+        "bybit-perp": fetch_latest_bybit_kline(project.symbol, now_ts),
     }
 
 
-def compute_cex_spot_reference(connection: sqlite3.Connection) -> float | None:
+def compute_cex_spot_reference(connection: sqlite3.Connection, project_id: str) -> float | None:
     row = connection.execute(
-        "SELECT close FROM price_feed WHERE exchange_id='binance-spot' ORDER BY timestamp DESC LIMIT 1"
+        """
+        SELECT close FROM price_feed
+        WHERE project_id=? AND exchange_id='binance-spot'
+        ORDER BY timestamp DESC LIMIT 1
+        """,
+        (project_id,),
     ).fetchone()
     return float(row[0]) if row and row[0] is not None else None
 
 
-def collect_once(connection: sqlite3.Connection) -> dict[str, int]:
+def collect_project_once(connection: sqlite3.Connection, project: ProjectConfig) -> dict[str, int]:
     now_ts = time.time()
     bucket = minute_bucket(now_ts)
     counts = {"prices": 0, "oi": 0, "funding": 0, "dex": 0}
 
-    for exchange_id, kline in fetch_latest_prices(now_ts).items():
+    for exchange_id, kline in fetch_latest_prices(project, now_ts).items():
         if not kline:
             continue
         ts, open_, high, low, close, volume = kline
-        upsert_price_row(connection, exchange_id, int(ts), open_, high, low, close, volume)
+        upsert_price_row(connection, project.id, exchange_id, int(ts), open_, high, low, close, volume)
         counts["prices"] += 1
 
-    binance_oi = fetch_latest_binance_oi()
+    binance_oi = fetch_latest_binance_oi(project.symbol)
     if binance_oi is not None:
-        upsert_oi_row(connection, "binance-perp", bucket, binance_oi)
+        upsert_oi_row(connection, project.id, "binance-perp", bucket, binance_oi)
         counts["oi"] += 1
 
-    bybit_oi, bybit_funding = fetch_latest_bybit_market_state()
+    bybit_oi, bybit_funding = fetch_latest_bybit_market_state(project.symbol)
     if bybit_oi is not None:
-        upsert_oi_row(connection, "bybit-perp", bucket, bybit_oi)
+        upsert_oi_row(connection, project.id, "bybit-perp", bucket, bybit_oi)
         counts["oi"] += 1
 
-    binance_funding = fetch_latest_binance_funding()
+    binance_funding = fetch_latest_binance_funding(project.symbol)
     if binance_funding is not None:
-        upsert_funding_row(connection, "binance-perp", bucket, binance_funding, binance_funding / 8)
+        upsert_funding_row(connection, project.id, "binance-perp", bucket, binance_funding, binance_funding / 8)
         counts["funding"] += 1
     if bybit_funding is not None:
-        upsert_funding_row(connection, "bybit-perp", bucket, bybit_funding, bybit_funding / 8)
+        upsert_funding_row(connection, project.id, "bybit-perp", bucket, bybit_funding, bybit_funding / 8)
         counts["funding"] += 1
 
-    dex_price, dex_liquidity = fetch_dex_snapshot()
+    dex_price, dex_liquidity = fetch_dex_snapshot(project)
     if dex_price is not None:
-        cex_spot = compute_cex_spot_reference(connection)
+        cex_spot = compute_cex_spot_reference(connection, project.id)
         deviation_pct = ((dex_price - cex_spot) / cex_spot * 100) if cex_spot not in (None, 0) else None
-        upsert_dex_row(connection, bucket, dex_price, dex_liquidity, deviation_pct)
-        upsert_price_row(connection, "bsc-pancakeswap", bucket, dex_price, dex_price, dex_price, dex_price, 0.0)
+        upsert_dex_row(connection, project.id, bucket, dex_price, dex_liquidity, deviation_pct)
+        upsert_price_row(connection, project.id, project.dex_exchange_id, bucket, dex_price, dex_price, dex_price, dex_price, 0.0)
         counts["dex"] += 1
 
-    connection.commit()
     return counts
+
+
+def collect_once(connection: sqlite3.Connection) -> dict[str, dict[str, int]]:
+    per_project: dict[str, dict[str, int]] = {}
+    for project in PROJECTS:
+        try:
+            per_project[project.id] = collect_project_once(connection, project)
+        except Exception as error:
+            per_project[project.id] = {"prices": 0, "oi": 0, "funding": 0, "dex": 0}
+            print(f"minute-poller[{project.id}]: error={error}")
+    connection.commit()
+    return per_project
 
 
 def run(db_path: Path, interval_seconds: int, once: bool) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(db_path)) as connection:
-        ensure_schema(connection)
+        ensure_project_schema(connection)
         while True:
-            counts = collect_once(connection)
-            print(
-                f"minute-poller: prices={counts['prices']} oi={counts['oi']} "
-                f"funding={counts['funding']} dex={counts['dex']}"
+            per_project = collect_once(connection)
+            summary = " ".join(
+                f"{project_id}:prices={counts['prices']}/oi={counts['oi']}/funding={counts['funding']}/dex={counts['dex']}"
+                for project_id, counts in per_project.items()
             )
+            print(f"minute-poller: {summary}")
             if once:
                 return
             sleep_for = max(1, interval_seconds - (time.time() % interval_seconds))
@@ -353,7 +351,7 @@ def run(db_path: Path, interval_seconds: int, once: bool) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Poll minute market data for BANANAS31.")
+    parser = argparse.ArgumentParser(description="Poll minute market data for configured projects.")
     parser.add_argument("--db", required=True, help="Path to SQLite DB")
     parser.add_argument("--interval-seconds", type=int, default=60, help="Polling cadence in seconds")
     parser.add_argument("--once", action="store_true", help="Poll once and exit")

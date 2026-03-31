@@ -15,7 +15,10 @@ def test_replay_events_returns_ranked_operator_events(tmp_path: Path) -> None:
 
     client = TestClient(create_app(Database(str(db_path))))
 
-    response = client.get("/api/replay/events", params={"window_secs": 10_000_000, "interval": "1h", "limit": 4})
+    response = client.get(
+        "/api/replay/events",
+        params={"project_id": "bananas31", "window_secs": 10_000_000, "interval": "1h", "limit": 4},
+    )
     assert response.status_code == 200
 
     payload = response.json()

@@ -1,6 +1,7 @@
 import './styles.css';
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts';
 import {
+  fetchProjects,
   fetchBasis,
   fetchDex,
   fetchFunding,
@@ -37,7 +38,7 @@ app.innerHTML = `
       <section class="brand-deck">
         <div class="brand-heading-row">
           <div class="brand-mark">
-            <p class="brand-kicker">BANANAS31</p>
+            <p class="brand-kicker" id="brand-kicker">BANANAS31</p>
             <h1 class="brand-title">Operator Cockpit</h1>
           </div>
           <div class="signal-badge" id="sync-state">History Synced</div>
@@ -59,6 +60,8 @@ app.innerHTML = `
     <section class="summary-tape" id="summary-grid"></section>
 
     <section class="command-deck">
+      <div class="toolbar-group project-group" id="project-group"></div>
+
       <div class="toolbar-group" id="interval-group">
         <button data-interval="1m" data-optional-interval hidden disabled aria-hidden="true">1M</button>
         <button data-interval="5m" data-optional-interval hidden disabled aria-hidden="true">5M</button>
@@ -186,6 +189,8 @@ const summaryGrid = document.querySelector('#summary-grid');
 const replayList = document.querySelector('#replay-list');
 const coverageList = document.querySelector('#coverage-list');
 const thesisList = document.querySelector('#thesis-list');
+const brandKicker = document.querySelector('#brand-kicker');
+const projectGroup = document.querySelector('#project-group');
 const intervalButtons = [...document.querySelectorAll('[data-interval]')];
 const focusButtons = [...document.querySelectorAll('[data-focus]')];
 const panelToggleButtons = [...document.querySelectorAll('[data-panel-toggle]')];
@@ -225,6 +230,8 @@ const panelElements = {
 };
 
 const state = {
+  projectId: persistedPrefs.projectId,
+  projects: [],
   interval: persistedPrefs.interval,
   focusMode: persistedPrefs.focusMode,
   supportedIntervals: new Set(BASE_INTERVALS),
@@ -246,6 +253,7 @@ const state = {
 
 function persistCockpitPrefs() {
   writeStoredCockpitPrefs(undefined, {
+    projectId: state.projectId,
     interval: state.interval,
     focusMode: state.focusMode
   });
@@ -255,7 +263,28 @@ function persistLayoutState() {
   writeStoredLayoutState(undefined, state.layout);
 }
 
+function getActiveProject() {
+  return state.projects.find((project) => project.id === state.projectId) || null;
+}
+
+function renderProjectButtons() {
+  projectGroup.innerHTML = state.projects.map((project) => `
+    <button data-project-id="${project.id}" class="${project.id === state.projectId ? 'active' : ''}">
+      ${project.label}
+    </button>
+  `).join('');
+
+  projectGroup.querySelectorAll('[data-project-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      selectProject(button.dataset.projectId);
+    });
+  });
+}
+
 function syncControlButtons() {
+  projectGroup.querySelectorAll('[data-project-id]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.projectId === state.projectId);
+  });
   intervalButtons.forEach((button) => {
     const supported = state.supportedIntervals.has(button.dataset.interval);
     const optional = button.hasAttribute('data-optional-interval');
@@ -372,9 +401,13 @@ function toggleOiSeries(key) {
 }
 
 async function hydrateOptionalIntervals() {
+  state.supportedIntervals = new Set(BASE_INTERVALS);
   const optionalIntervals = ['1m', '5m', '30m'];
   const results = await Promise.all(
-    optionalIntervals.map(async (interval) => [interval, await probeCockpitIntervalSupport(interval, getViewConfig(interval))])
+    optionalIntervals.map(async (interval) => [
+      interval,
+      await probeCockpitIntervalSupport(state.projectId, interval, getViewConfig(interval))
+    ])
   );
   results.forEach(([interval, supported]) => {
     if (supported) {
@@ -563,14 +596,20 @@ function updateStatusHeadline() {
 }
 
 function renderSummary(snapshot) {
+  const activeProject = snapshot.project || getActiveProject();
+  const hasDex = activeProject?.has_dex !== false;
+  brandKicker.textContent = activeProject?.label || 'PROJECT';
+  document.title = `${activeProject?.label || 'Project'} Operator Cockpit`;
   const cards = [
     ['Spot', formatPrice(snapshot.prices['binance-spot'])],
     ['Perp', formatPrice(snapshot.prices['binance-perp'])],
-    ['DEX', formatPrice(snapshot.prices.dex)],
     ['Basis', formatPercent(snapshot.summary.basis_agg_pct, 4)],
     ['Bybit', formatPrice(snapshot.prices['bybit-perp'])],
     ['Perp OI', formatCompact(snapshot.summary.oi_total)]
   ];
+  if (hasDex) {
+    cards.splice(2, 0, ['DEX', formatPrice(snapshot.prices.dex)]);
+  }
 
   summaryGrid.innerHTML = cards.map(([label, value]) => `
     <article class="summary-card">
@@ -600,11 +639,13 @@ function renderCoverage(data) {
     ['BN Spot', data.spot.bars, lastPointTime(data.spot.bars)],
     ['BN Perp', data.perp.bars, lastPointTime(data.perp.bars)],
     ['Bybit', data.bybit.bars, lastPointTime(data.bybit.bars)],
-    ['DEX', data.dex.bars, lastPointTime(data.dex.bars)],
     ['Basis', data.basis.aggregated, lastPointTime(data.basis.aggregated)],
     ['Perp OI', data.oi.aggregated, lastPointTime(data.oi.aggregated)],
     ['Funding', data.funding.per_source?.['binance-perp'] || [], lastPointTime(data.funding.per_source?.['binance-perp'] || [])]
   ];
+  if (data.snapshot.project?.has_dex) {
+    rows.splice(3, 0, ['DEX', data.dex.bars, lastPointTime(data.dex.bars)]);
+  }
 
   coverageList.innerHTML = rows.map(([label, series, timestamp]) => {
     const count = Array.isArray(series) ? series.length : 0;
@@ -945,6 +986,7 @@ function stepReplayEvent(direction) {
 }
 
 function updatePanelMeta(data) {
+  const hasDex = data.snapshot.project?.has_dex;
   const latestBasis = latestPoint(data.basis.aggregated);
   const latestOiAgg = latestPoint(data.oi.aggregated);
   const latestOiBinance = latestPoint(data.oi.per_source?.['binance-perp'] || []);
@@ -960,7 +1002,7 @@ function updatePanelMeta(data) {
     .map((value) => formatPercent(value * 100, 4));
   priceMeta.textContent = state.replayEvent
     ? `${data.spot.bars.length} ${state.interval.toUpperCase()} · replay lock`
-    : `${data.spot.bars.length} ${state.interval.toUpperCase()} · spot + perp + dex`;
+    : `${data.spot.bars.length} ${state.interval.toUpperCase()} · spot + perp${hasDex ? ' + dex' : ''}`;
   basisMeta.textContent = `${data.basis.aggregated.length} agg · ${formatPercent(latestBasis?.value, 2)}`;
   oiMeta.textContent = `${oiSources || 'No sources'} · ${formatCompact(latestOiAgg?.value)} agg · BN ${formatCompact(latestOiBinance?.value)} · BY ${formatCompact(latestOiBybit?.value)}`;
   const fundingCount = Math.max(
@@ -983,15 +1025,15 @@ async function loadCockpit() {
 
   try {
     const [snapshot, spot, perp, bybit, dex, basis, oi, funding, replay] = await Promise.all([
-      fetchSnapshot(),
-      fetchOhlcv('binance-spot', minutes, interval),
-      fetchOhlcv('binance-perp', minutes, interval),
-      fetchOhlcv('bybit-perp', minutes, interval),
-      fetchDex(minutes, interval),
-      fetchBasis(minutes * 60, interval),
-      fetchOi(minutes, interval),
-      fetchFunding(minutes * 60, view.fundingIntervalSeconds),
-      fetchReplayEvents(minutes * 60, interval, view.replayLimit)
+      fetchSnapshot(state.projectId),
+      fetchOhlcv(state.projectId, 'binance-spot', minutes, interval),
+      fetchOhlcv(state.projectId, 'binance-perp', minutes, interval),
+      fetchOhlcv(state.projectId, 'bybit-perp', minutes, interval),
+      fetchDex(state.projectId, minutes, interval),
+      fetchBasis(state.projectId, minutes * 60, interval),
+      fetchOi(state.projectId, minutes, interval),
+      fetchFunding(state.projectId, minutes * 60, view.fundingIntervalSeconds),
+      fetchReplayEvents(state.projectId, minutes * 60, interval, view.replayLimit)
     ]);
 
     if (requestId !== state.loadRequestId || interval !== state.interval) {
@@ -1112,6 +1154,37 @@ function selectInterval(interval) {
   });
 }
 
+function selectProject(projectId) {
+  if (!projectId || projectId === state.projectId || !state.projects.some((project) => project.id === projectId)) {
+    return;
+  }
+
+  chartSyncController?.suspend();
+  Object.values(charts).forEach(({ chart }) => {
+    try {
+      chart.clearCrosshairPosition?.();
+    } catch (error) {
+      if (!shouldIgnoreRangeSyncError(error)) {
+        console.warn('crosshair clear skipped', error);
+      }
+    }
+  });
+  state.projectId = projectId;
+  state.replayEvent = null;
+  state.replayEvents = [];
+  persistCockpitPrefs();
+  renderProjectButtons();
+  syncControlButtons();
+  replayList.innerHTML = '<span class="loading">Switching project…</span>';
+  hydrateOptionalIntervals()
+    .then(() => loadCockpit())
+    .catch((error) => {
+      console.error(error);
+      replayList.innerHTML = `<span class="loading">${error.message}</span>`;
+      syncState.textContent = 'Fault';
+    });
+}
+
 intervalButtons.forEach((button) => {
   button.addEventListener('click', () => {
     selectInterval(button.dataset.interval);
@@ -1178,7 +1251,16 @@ supportSplitters.forEach((splitter) => {
 });
 applyLayoutState();
 syncControlButtons();
-hydrateOptionalIntervals()
+fetchProjects()
+  .then((catalog) => {
+    state.projects = catalog.projects || [];
+    if (!state.projects.some((project) => project.id === state.projectId)) {
+      state.projectId = catalog.default_project_id || 'bananas31';
+      persistCockpitPrefs();
+    }
+    renderProjectButtons();
+    return hydrateOptionalIntervals();
+  })
   .then(() => loadCockpit())
   .catch((error) => {
   console.error(error);

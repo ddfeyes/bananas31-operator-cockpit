@@ -5,34 +5,36 @@ const VALID_FOCUS_MODES = new Set(['all', 'basis', 'leverage', 'funding']);
 
 export function readStoredCockpitPrefs(storage = globalThis?.localStorage) {
   if (!storage) {
-    return { interval: '4h', focusMode: 'all' };
+    return { projectId: 'bananas31', interval: '4h', focusMode: 'all' };
   }
 
   try {
     const raw = storage.getItem(STORAGE_KEY);
     if (!raw) {
-      return { interval: '4h', focusMode: 'all' };
+      return { projectId: 'bananas31', interval: '4h', focusMode: 'all' };
     }
 
     const parsed = JSON.parse(raw);
     return {
+      projectId: typeof parsed.projectId === 'string' && parsed.projectId ? parsed.projectId : 'bananas31',
       interval: VALID_INTERVALS.has(parsed.interval) ? parsed.interval : '4h',
       focusMode: VALID_FOCUS_MODES.has(parsed.focusMode) ? parsed.focusMode : 'all'
     };
   } catch {
-    return { interval: '4h', focusMode: 'all' };
+    return { projectId: 'bananas31', interval: '4h', focusMode: 'all' };
   }
 }
 
 export function writeStoredCockpitPrefs(
   storage = globalThis?.localStorage,
-  prefs = { interval: '4h', focusMode: 'all' }
+  prefs = { projectId: 'bananas31', interval: '4h', focusMode: 'all' }
 ) {
   if (!storage) {
     return;
   }
 
   const payload = {
+    projectId: typeof prefs.projectId === 'string' && prefs.projectId ? prefs.projectId : 'bananas31',
     interval: VALID_INTERVALS.has(prefs.interval) ? prefs.interval : '4h',
     focusMode: VALID_FOCUS_MODES.has(prefs.focusMode) ? prefs.focusMode : 'all'
   };
